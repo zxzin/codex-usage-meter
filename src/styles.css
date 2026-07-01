@@ -1,0 +1,538 @@
+:root {
+  color: #0e1b31;
+  background: transparent;
+  font-family:
+    "SF Pro Rounded", Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: geometricPrecision;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  background-color: transparent !important;
+}
+
+button {
+  color: inherit;
+  font: inherit;
+}
+
+.app {
+  --ink: #102139;
+  --line: rgba(16, 33, 57, 0.92);
+  --text: #0e1b31;
+  --muted: rgba(16, 33, 57, 0.58);
+  --accent: #1667e8;
+  --accent-2: #16aa73;
+  --heat: #16aa73;
+  --warning: #f4c83e;
+  --danger: #e33f39;
+  --shadow: 0 8px 16px rgba(28, 54, 94, 0.22), 0 2px 0 rgba(16, 33, 57, 0.22);
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  background-color: transparent !important;
+  isolation: isolate;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+}
+
+.heat-warm,
+.heat-waiting,
+.heat-stale {
+  --heat: var(--warning);
+}
+
+.heat-hot,
+.heat-limit_near {
+  --heat: var(--danger);
+}
+
+.meter-window {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 1fr;
+  border: 0;
+  border-radius: 0;
+  clip-path: none;
+  background: transparent;
+  background-color: transparent !important;
+  isolation: isolate;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  box-shadow: none;
+  backdrop-filter: none;
+  overflow: visible;
+}
+
+.meter-body {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  background-color: transparent !important;
+  isolation: isolate;
+}
+
+.living-meter,
+.loading-meter {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.living-meter {
+  overflow: hidden;
+  --life-speed: 1.4s;
+  --hive-glow: 0.44;
+}
+
+.image-living {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+}
+
+.hive-meter {
+  background: transparent;
+  background-color: transparent !important;
+  isolation: isolate;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+}
+
+.living-refraction {
+  display: none;
+}
+
+.hive-reference-wrap {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 3;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+  filter:
+    drop-shadow(0 1px 0 rgba(16, 33, 57, 0.18))
+    drop-shadow(0 0 3px rgba(246, 171, 43, calc(var(--hive-glow) * 0.24)));
+}
+
+.hive-reference-compact {
+  width: 64px;
+  height: 36px;
+}
+
+.hive-compact-quota-slots {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  shape-rendering: geometricPrecision;
+}
+
+.hive-compact-slot-row.primary {
+  color: var(--quota-5h-color);
+}
+
+.hive-compact-slot-row.secondary {
+  color: var(--quota-total-color);
+}
+
+.hive-cluster-backplate {
+  fill: rgba(255, 208, 42, 0.99);
+  stroke: rgba(16, 33, 57, 0.82);
+  stroke-linejoin: miter;
+  stroke-width: 1.35px;
+  vector-effect: non-scaling-stroke;
+  filter:
+    drop-shadow(0 1px 0 rgba(255, 255, 255, 0.32))
+    drop-shadow(0 1px 0 rgba(16, 33, 57, 0.1));
+}
+
+.hive-slot-label-base,
+.hive-slot-base,
+.hive-slot-inner-base,
+.hive-slot-inner-outline,
+.hive-slot-outline {
+  vector-effect: non-scaling-stroke;
+  stroke: rgba(16, 33, 57, 0.84);
+  stroke-linejoin: miter;
+}
+
+.hive-slot-label-base {
+  fill: rgba(255, 232, 89, 0.99);
+  stroke-width: 1.5px;
+  filter:
+    drop-shadow(0 1px 0 rgba(255, 255, 255, 0.36))
+    drop-shadow(0 1px 0 rgba(16, 33, 57, 0.12));
+}
+
+.hive-slot-label-text {
+  fill: rgba(28, 88, 180, 0.98);
+  font-family: "DIN Alternate", "Avenir Next Condensed", "SF Pro Display", Inter, ui-sans-serif, system-ui;
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 0;
+  paint-order: stroke;
+  stroke: rgba(255, 247, 185, 0.96);
+  stroke-linejoin: round;
+  stroke-width: 2.7px;
+  text-anchor: middle;
+}
+
+.hive-slot-label-text.label-wk {
+  font-size: 28px;
+}
+
+.hive-slot-base {
+  fill: rgba(255, 219, 57, 0.99);
+  stroke: rgba(16, 33, 57, 0.86);
+  stroke-width: 1.45px;
+  filter:
+    drop-shadow(0 1px 0 rgba(255, 255, 255, 0.34))
+    drop-shadow(0 1px 0 rgba(16, 33, 57, 0.1));
+}
+
+.hive-compact-slot-row.critical .hive-slot-base {
+  fill: rgba(255, 190, 62, 0.98);
+}
+
+.hive-slot-inner-base {
+  fill: rgba(237, 246, 255, 0.96);
+  stroke: none;
+  stroke-width: 0;
+}
+
+.hive-compact-slot-row.secondary .hive-slot-inner-base {
+  fill: rgba(237, 250, 239, 0.96);
+}
+
+.hive-compact-slot-row.critical .hive-slot-inner-base {
+  fill: rgba(255, 238, 231, 0.98);
+}
+
+.hive-slot-fill {
+  fill: currentColor;
+  filter: drop-shadow(0 0 1.4px currentColor);
+}
+
+.hive-slot-fill-shade {
+  fill: rgba(16, 33, 57, 0.13);
+  mix-blend-mode: multiply;
+}
+
+.hive-slot-fill-gloss {
+  fill: rgba(255, 255, 255, 0.62);
+}
+
+.hive-slot-inner-outline {
+  fill: none;
+  stroke: rgba(16, 33, 57, 0.56);
+  stroke-width: 0.72px;
+}
+
+.hive-slot-outline {
+  fill: none;
+  stroke: rgba(16, 33, 57, 0.9);
+  stroke-width: 1.45px;
+}
+
+.bee-unit,
+.bee-unit img {
+  position: absolute;
+  display: block;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.bee-unit {
+  z-index: 6;
+  width: 18px;
+  aspect-ratio: 160 / 144;
+  transform:
+    translate(-50%, -50%)
+    rotate(calc(var(--orbit-angle, 0deg) + var(--bee-angle-offset, 0deg)))
+    translateX(var(--orbit-radius))
+    rotate(96deg)
+    scale(0.96);
+  filter: drop-shadow(0 1px 0 rgba(16, 33, 57, 0.18));
+  will-change: transform;
+}
+
+.bee-unit img {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.bee-wing-layer {
+  z-index: 1;
+  backface-visibility: hidden;
+  transform: translateZ(0);
+  will-change: transform, opacity;
+  filter: drop-shadow(0 0 2px rgba(215, 241, 255, 0.75));
+}
+
+.bee-wing-layer.wing-left {
+  clip-path: inset(0 48% 0 0);
+  transform-origin: 34% 26%;
+  animation: bee-left-wing-flap 112ms ease-in-out infinite;
+}
+
+.bee-wing-layer.wing-right {
+  clip-path: inset(0 0 0 40%);
+  transform-origin: 53% 25%;
+  animation: bee-right-wing-flap 112ms ease-in-out infinite;
+}
+
+.bee-body-layer {
+  z-index: 2;
+}
+
+.bee-unit.resting {
+  width: 16px;
+  z-index: 7;
+  opacity: 0.82;
+  animation: none;
+  transform:
+    translate(-50%, -50%)
+    translate(var(--rest-x), var(--rest-y))
+    rotate(var(--rest-rotate))
+    scale(0.88);
+}
+
+.bee-unit.resting .bee-wing-layer {
+  animation: none;
+  opacity: 0.56;
+  filter: none;
+}
+
+.bee-unit.resting .bee-wing-layer.wing-left {
+  transform: translate(-1px, 1px) rotate(-10deg) scaleY(0.78);
+}
+
+.bee-unit.resting .bee-wing-layer.wing-right {
+  transform: translate(1px, 1px) rotate(8deg) scaleY(0.78);
+}
+
+.loading-meter {
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.loading-ring {
+  width: 52px;
+  height: 52px;
+  border: 5px solid rgba(19, 38, 66, 0.12);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: spin 1s linear infinite;
+}
+
+.detail-popover {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  transform: translateY(calc(100% + 10px));
+  border: 2px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease;
+  backdrop-filter: blur(18px);
+}
+
+.app:hover .detail-popover {
+  transform: translateY(0);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.details {
+  padding: 10px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.detail-grid div {
+  display: grid;
+  gap: 3px;
+}
+
+.detail-grid span,
+.source-note,
+.session-list span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.detail-grid strong,
+.session-list strong {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 820;
+  white-space: nowrap;
+}
+
+.session-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.session-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.session-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-note {
+  margin: 8px 0 0;
+}
+
+.size-micro.app {
+  --shadow: none;
+  padding: 0;
+}
+
+.size-micro .meter-window {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 1fr;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.size-micro .meter-body {
+  position: relative;
+  padding: 0;
+}
+
+.size-micro .detail-popover {
+  display: none;
+}
+
+.size-micro .living-meter {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: auto;
+}
+
+.size-micro .meter-body:has(.image-living) {
+  padding: 0;
+}
+
+.size-micro .image-living {
+  max-width: none;
+  max-height: none;
+  overflow: visible;
+}
+
+.size-micro .bee-unit {
+  width: 15px;
+}
+
+.size-micro .bee-unit.resting {
+  width: 14px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes bee-left-wing-flap {
+  0%,
+  100% {
+    transform: translate3d(-1px, -3px, 0) rotate(-18deg) scaleY(1.18) scaleX(1.08);
+    opacity: 1;
+  }
+  25% {
+    transform: translate3d(0, 0, 0) rotate(2deg) scaleY(0.72) scaleX(1.12);
+    opacity: 0.84;
+  }
+  50% {
+    transform: translate3d(1px, 3px, 0) rotate(16deg) scaleY(0.36) scaleX(1.2);
+    opacity: 0.58;
+  }
+  75% {
+    transform: translate3d(0, 0, 0) rotate(-4deg) scaleY(0.78) scaleX(1.1);
+    opacity: 0.82;
+  }
+}
+
+@keyframes bee-right-wing-flap {
+  0%,
+  100% {
+    transform: translate3d(1px, -3px, 0) rotate(16deg) scaleY(1.14) scaleX(1.06);
+    opacity: 0.95;
+  }
+  25% {
+    transform: translate3d(0, 0, 0) rotate(-2deg) scaleY(0.7) scaleX(1.12);
+    opacity: 0.8;
+  }
+  50% {
+    transform: translate3d(-1px, 3px, 0) rotate(-15deg) scaleY(0.34) scaleX(1.2);
+    opacity: 0.54;
+  }
+  75% {
+    transform: translate3d(0, 0, 0) rotate(5deg) scaleY(0.76) scaleX(1.1);
+    opacity: 0.78;
+  }
+}

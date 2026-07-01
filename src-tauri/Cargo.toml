@@ -1,0 +1,30 @@
+[package]
+name = "token-meter"
+version = "0.1.0"
+description = "A tiny local token burn meter."
+authors = ["zin"]
+edition = "2021"
+
+[lib]
+name = "token_meter_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "token-meter"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2.5.3", features = [] }
+
+[dependencies]
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tauri = { version = "2.9.5", features = ["macos-private-api"] }
+walkdir = "2.5.0"
+reqwest = { version = "0.13.4", features = ["blocking", "json"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6.4", features = ["exception", "disable-encoding-assertions"] }
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-core-foundation", "NSColor", "NSView", "NSWindow"] }
+objc2-web-kit = { version = "0.3.2", default-features = false, features = ["std", "objc2-app-kit", "objc2-core-foundation", "WKWebView"] }
