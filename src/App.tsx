@@ -218,34 +218,25 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   const primary = clampPercent(snapshot.primary?.remainingPercent);
   const secondary = clampPercent(snapshot.secondary?.remainingPercent);
   const speedRatio = ratePercent(animationRate);
-  const live = Math.max(0.08, speedRatio);
-  const isFlying = animationRate > 0;
-  const flySpeed = `${Math.max(0.56, 3.6 - speedRatio * 2.95)}s`;
+  const visualSpeedRatio = Math.max(0.16, speedRatio);
+  const live = Math.max(0.08, visualSpeedRatio);
+  const flySpeed = `${Math.max(0.56, 3.6 - visualSpeedRatio * 2.95)}s`;
   const beeCount = 3;
   const quotaLabel = `5H ${formatPercent(snapshot.primary?.remainingPercent)}; Weekly ${formatPercent(snapshot.secondary?.remainingPercent)}`;
-  useContinuousOrbitAngle(hiveRef, isFlying, speedRatio);
+  useContinuousOrbitAngle(hiveRef, true, visualSpeedRatio);
 
   const bees = Array.from({ length: beeCount }, (_, index) => {
     const orbitRadius = 29;
-    const restingPositions = [
-      { x: 18, y: -18, rotate: -6 },
-      { x: -16, y: 18, rotate: 188 },
-      { x: 36, y: 12, rotate: 94 },
-    ];
-    const rest = restingPositions[index] ?? restingPositions[0];
     return (
       <span
         key={index}
-        className={`bee-unit b${index + 1}${isFlying ? "" : " resting"}`}
+        className={`bee-unit b${index + 1}`}
         style={
           {
             left: "50%",
             top: "50%",
             "--bee-angle-offset": `${index * 120 - 18}deg`,
             "--orbit-radius": `${orbitRadius}px`,
-            "--rest-x": `${rest.x}px`,
-            "--rest-y": `${rest.y}px`,
-            "--rest-rotate": `${rest.rotate}deg`,
           } as CSSProperties
         }
       >
@@ -259,7 +250,7 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   return (
     <div
       ref={hiveRef}
-      className={`living-meter image-living hive-meter hive-compact${isFlying ? "" : " resting"}`}
+      className="living-meter image-living hive-meter hive-compact"
       data-tauri-drag-region="deep"
       style={
         {

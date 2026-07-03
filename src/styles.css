@@ -320,32 +320,6 @@ button {
   z-index: 2;
 }
 
-.bee-unit.resting {
-  width: 16px;
-  z-index: 7;
-  opacity: 0.82;
-  animation: none;
-  transform:
-    translate(-50%, -50%)
-    translate(var(--rest-x), var(--rest-y))
-    rotate(var(--rest-rotate))
-    scale(0.88);
-}
-
-.bee-unit.resting .bee-wing-layer {
-  animation: none;
-  opacity: 0.56;
-  filter: none;
-}
-
-.bee-unit.resting .bee-wing-layer.wing-left {
-  transform: translate(-1px, 1px) rotate(-10deg) scaleY(0.78);
-}
-
-.bee-unit.resting .bee-wing-layer.wing-right {
-  transform: translate(1px, 1px) rotate(8deg) scaleY(0.78);
-}
-
 .loading-meter {
   gap: 10px;
   color: var(--muted);
@@ -485,10 +459,6 @@ button {
 
 .size-micro .bee-unit {
   width: 15px;
-}
-
-.size-micro .bee-unit.resting {
-  width: 14px;
 }
 
 @keyframes spin {
