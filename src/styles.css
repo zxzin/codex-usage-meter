@@ -281,10 +281,11 @@ button {
   aspect-ratio: 160 / 144;
   transform:
     translate(-50%, -50%)
-    rotate(calc(var(--orbit-angle, 0deg) + var(--bee-angle-offset, 0deg)))
+    rotate(var(--bee-angle-offset, 0deg))
     translateX(var(--orbit-radius))
     rotate(96deg)
     scale(0.96);
+  animation: bee-orbit var(--life-speed, 1.4s) linear infinite;
   filter: drop-shadow(0 1px 0 rgba(16, 33, 57, 0.18));
   will-change: transform;
 }
@@ -464,6 +465,25 @@ button {
 @keyframes spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes bee-orbit {
+  from {
+    transform:
+      translate(-50%, -50%)
+      rotate(var(--bee-angle-offset, 0deg))
+      translateX(var(--orbit-radius))
+      rotate(96deg)
+      scale(0.96);
+  }
+  to {
+    transform:
+      translate(-50%, -50%)
+      rotate(calc(var(--bee-angle-offset, 0deg) + 360deg))
+      translateX(var(--orbit-radius))
+      rotate(96deg)
+      scale(0.96);
   }
 }
 

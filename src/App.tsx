@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { type CSSProperties, type RefObject, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { getUsageSnapshot } from "./data";
 import {
   formatPercent,
@@ -212,7 +212,6 @@ function LoadingMeter({ labels }: { labels: Labels }) {
 }
 
 function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
-  const hiveRef = useRef<HTMLDivElement>(null);
   const animationRate = snapshot.animationBurnRatePerMin;
   const speed = ratePercent(animationRate) * 100;
   const primary = clampPercent(snapshot.primary?.remainingPercent);
@@ -223,7 +222,6 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   const flySpeed = `${Math.max(0.56, 3.6 - visualSpeedRatio * 2.95)}s`;
   const beeCount = 3;
   const quotaLabel = `5H ${formatPercent(snapshot.primary?.remainingPercent)}; Weekly ${formatPercent(snapshot.secondary?.remainingPercent)}`;
-  useContinuousOrbitAngle(hiveRef, true, visualSpeedRatio);
 
   const bees = Array.from({ length: beeCount }, (_, index) => {
     const orbitRadius = 29;
@@ -249,7 +247,6 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
 
   return (
     <div
-      ref={hiveRef}
       className="living-meter image-living hive-meter hive-compact"
       data-tauri-drag-region="deep"
       style={
@@ -536,53 +533,6 @@ function Detail({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
-}
-
-function useContinuousOrbitAngle(
-  rootRef: RefObject<HTMLElement | null>,
-  isRunning: boolean,
-  speedRatio: number,
-) {
-  const targetRef = useRef({ isRunning, speedRatio });
-
-  useEffect(() => {
-    targetRef.current = { isRunning, speedRatio };
-  }, [isRunning, speedRatio]);
-
-  useEffect(() => {
-    let frame = 0;
-    let lastTime = performance.now();
-    let angle = 0;
-    let currentDegPerMs = 0;
-
-    const tick = (now: number) => {
-      const dt = Math.min(80, Math.max(0, now - lastTime));
-      lastTime = now;
-
-      const target = targetRef.current;
-      const nextDegPerMs = target.isRunning
-        ? orbitDegPerMs(target.speedRatio)
-        : 0;
-      const smoothing = 1 - Math.exp(-dt / 180);
-      currentDegPerMs += (nextDegPerMs - currentDegPerMs) * smoothing;
-
-      if (target.isRunning || currentDegPerMs > 0.00001) {
-        angle = (angle + currentDegPerMs * dt) % 360;
-        rootRef.current?.style.setProperty("--orbit-angle", `${angle.toFixed(2)}deg`);
-      }
-
-      frame = window.requestAnimationFrame(tick);
-    };
-
-    frame = window.requestAnimationFrame(tick);
-    return () => window.cancelAnimationFrame(frame);
-  }, [rootRef]);
-}
-
-function orbitDegPerMs(speedRatio: number) {
-  const safeRatio = Number.isFinite(speedRatio) ? Math.min(1, Math.max(0, speedRatio)) : 0;
-  const durationSeconds = Math.max(0.56, 3.6 - safeRatio * 2.95);
-  return 360 / (durationSeconds * 1000);
 }
 
 function ratePercent(rate: number) {
