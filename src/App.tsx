@@ -13,6 +13,20 @@ import type { UsageSnapshot } from "./types";
 import beeBodyAsset from "./assets/living/bee-body-wingless-ui.png";
 import beeWingAsset from "./assets/living/bee-wing-ui.png";
 
+const BEE_SPEED_FULL_RATE_PER_MIN = 120_000;
+const BEE_SPEED_CURVE = 0.62;
+const BEE_ORBIT_IDLE_RATIO = 0.18;
+const BEE_ORBIT_SLOW_SECONDS = 3.2;
+const BEE_ORBIT_FAST_SECONDS = 0.72;
+const BEE_TRAIL_START_RATIO = 0.48;
+const BEE_TRAIL_NEAR_MAX_OPACITY = 0.22;
+const BEE_TRAIL_FAR_MAX_OPACITY = 0.1;
+const BEE_WING_SLOW_MS = 118;
+const BEE_WING_FAST_MS = 68;
+const BEE_ORBIT_BASE_RADIUS_PX = 25.5;
+const BEE_ORBIT_FAST_RADIUS_PX = 35;
+const BEE_ORBIT_RADIUS_GROW_START_RATIO = 0.55;
+
 export function App() {
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -217,23 +231,25 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   const primary = clampPercent(snapshot.primary?.remainingPercent);
   const secondary = clampPercent(snapshot.secondary?.remainingPercent);
   const speedRatio = ratePercent(animationRate);
-  const visualSpeedRatio = Math.max(0.16, speedRatio);
+  const visualSpeedRatio = Math.max(BEE_ORBIT_IDLE_RATIO, speedRatio);
   const live = Math.max(0.08, visualSpeedRatio);
-  const flySpeed = `${Math.max(0.56, 3.6 - visualSpeedRatio * 2.95)}s`;
+  const flySpeed = `${beeOrbitDurationSeconds(speedRatio).toFixed(2)}s`;
+  const trailIntensity = beeTrailIntensity(visualSpeedRatio);
+  const wingSpeed = `${beeWingDurationMs(visualSpeedRatio)}ms`;
+  const orbitRadius = beeOrbitRadiusPx(visualSpeedRatio);
   const beeCount = 3;
   const quotaLabel = `5H ${formatPercent(snapshot.primary?.remainingPercent)}; Weekly ${formatPercent(snapshot.secondary?.remainingPercent)}`;
 
-  const bees = Array.from({ length: beeCount }, (_, index) => {
-    const orbitRadius = 29;
+  const renderBee = (index: number, angleOffset: number, layerClass = "") => {
     return (
       <span
-        key={index}
-        className={`bee-unit b${index + 1}`}
+        key={`${layerClass || "main"}-${index}`}
+        className={`bee-unit b${index + 1}${layerClass ? ` ${layerClass}` : ""}`}
         style={
           {
             left: "50%",
             top: "50%",
-            "--bee-angle-offset": `${index * 120 - 18}deg`,
+            "--bee-angle-offset": `${angleOffset}deg`,
             "--orbit-radius": `${orbitRadius}px`,
           } as CSSProperties
         }
@@ -243,7 +259,16 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
         <img className="bee-body-layer" src={beeBodyAsset} alt="" />
       </span>
     );
-  });
+  };
+
+  const bees = Array.from({ length: beeCount }, (_, index) => {
+    const baseAngle = index * 120 - 18;
+    return [
+      renderBee(index, baseAngle - 24, "bee-ghost bee-ghost-far"),
+      renderBee(index, baseAngle - 12, "bee-ghost bee-ghost-near"),
+      renderBee(index, baseAngle),
+    ];
+  }).flat();
 
   return (
     <div
@@ -252,6 +277,9 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
       style={
         {
           "--life-speed": flySpeed,
+          "--wing-speed": wingSpeed,
+          "--bee-trail-near-opacity": (trailIntensity * BEE_TRAIL_NEAR_MAX_OPACITY).toFixed(3),
+          "--bee-trail-far-opacity": (trailIntensity * BEE_TRAIL_FAR_MAX_OPACITY).toFixed(3),
           "--speed-pct": speed,
           "--hive-glow": 0.22 + live * 0.62,
           "--quota-5h": primary,
@@ -536,7 +564,39 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 function ratePercent(rate: number) {
-  return Math.min(1, Math.max(0, rate / 220_000));
+  const safeRate = Number.isFinite(rate) ? Math.max(0, rate) : 0;
+  const normalized = Math.min(1, safeRate / BEE_SPEED_FULL_RATE_PER_MIN);
+  return Math.pow(normalized, BEE_SPEED_CURVE);
+}
+
+function beeOrbitDurationSeconds(speedRatio: number) {
+  const visualRatio = Math.min(1, Math.max(BEE_ORBIT_IDLE_RATIO, speedRatio));
+  return BEE_ORBIT_SLOW_SECONDS - visualRatio * (BEE_ORBIT_SLOW_SECONDS - BEE_ORBIT_FAST_SECONDS);
+}
+
+function beeTrailIntensity(visualSpeedRatio: number) {
+  const safeRatio = Math.min(1, Math.max(0, visualSpeedRatio));
+  return Math.min(1, Math.max(0, (safeRatio - BEE_TRAIL_START_RATIO) / (1 - BEE_TRAIL_START_RATIO)));
+}
+
+function beeWingDurationMs(visualSpeedRatio: number) {
+  const safeRatio = Math.min(1, Math.max(0, visualSpeedRatio));
+  return Math.round(BEE_WING_SLOW_MS - safeRatio * (BEE_WING_SLOW_MS - BEE_WING_FAST_MS));
+}
+
+function beeOrbitRadiusPx(visualSpeedRatio: number) {
+  const safeRatio = Math.min(1, Math.max(0, visualSpeedRatio));
+  const radiusIntensity = Math.min(
+    1,
+    Math.max(
+      0,
+      (safeRatio - BEE_ORBIT_RADIUS_GROW_START_RATIO) / (1 - BEE_ORBIT_RADIUS_GROW_START_RATIO),
+    ),
+  );
+  return Number(
+    (BEE_ORBIT_BASE_RADIUS_PX
+      + radiusIntensity * (BEE_ORBIT_FAST_RADIUS_PX - BEE_ORBIT_BASE_RADIUS_PX)).toFixed(1),
+  );
 }
 
 function clampPercent(value?: number | null) {

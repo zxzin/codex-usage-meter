@@ -290,6 +290,31 @@ button {
   will-change: transform;
 }
 
+.bee-unit.bee-ghost {
+  z-index: 4;
+  opacity: var(--bee-trail-far-opacity, 0);
+  filter:
+    blur(0.8px)
+    drop-shadow(0 0 2px rgba(255, 225, 92, 0.2));
+  will-change: transform, opacity;
+}
+
+.bee-unit.bee-ghost-near {
+  z-index: 5;
+  opacity: var(--bee-trail-near-opacity, 0);
+  filter:
+    blur(0.42px)
+    drop-shadow(0 0 2px rgba(255, 225, 92, 0.26));
+}
+
+.bee-unit.bee-ghost .bee-wing-layer {
+  display: none;
+}
+
+.bee-unit.bee-ghost .bee-body-layer {
+  opacity: 0.8;
+}
+
 .bee-unit img {
   inset: 0;
   width: 100%;
@@ -308,13 +333,13 @@ button {
 .bee-wing-layer.wing-left {
   clip-path: inset(0 48% 0 0);
   transform-origin: 34% 26%;
-  animation: bee-left-wing-flap 112ms ease-in-out infinite;
+  animation: bee-left-wing-flap var(--wing-speed, 112ms) ease-in-out infinite;
 }
 
 .bee-wing-layer.wing-right {
   clip-path: inset(0 0 0 40%);
   transform-origin: 53% 25%;
-  animation: bee-right-wing-flap 112ms ease-in-out infinite;
+  animation: bee-right-wing-flap var(--wing-speed, 112ms) ease-in-out infinite;
 }
 
 .bee-body-layer {
