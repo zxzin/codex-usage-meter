@@ -28,10 +28,11 @@ const BEE_ORBIT_FAST_RADIUS_PX = 38;
 const BEE_ORBIT_RADIUS_CURVE = 1.35;
 const BEE_ORBIT_SMOOTHING_PER_SECOND = 7;
 const BEE_ORBIT_MAX_FRAME_SECONDS = 0.05;
+// Static bees perch by foot contact on the visible honeycomb frame.
 const BEE_STATIC_PLACEMENTS = [
-  { xPx: -38, yPx: 23, rotationDeg: -10, scale: 0.9, flipX: false },
-  { xPx: 6, yPx: -24, rotationDeg: 5, scale: 0.82, flipX: false },
-  { xPx: 41, yPx: 11, rotationDeg: -7, scale: 0.88, flipX: true },
+  { xPx: -38, yPx: 11, rotationDeg: -7, scale: 0.9, flipX: false },
+  { xPx: 6, yPx: -23, rotationDeg: 5, scale: 0.82, flipX: false },
+  { xPx: 29, yPx: 12, rotationDeg: 6, scale: 0.88, flipX: true },
 ] as const;
 
 export function App() {
