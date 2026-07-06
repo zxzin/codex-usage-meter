@@ -19,7 +19,7 @@ const ACTIVE_GRACE_SECONDS: i64 = 90;
 const RECENT_FILE_SECONDS: u64 = 2 * 24 * 60 * 60;
 const MAX_SESSION_FILES: usize = 120;
 const CODEX_USAGE_ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
-const ACCOUNT_USAGE_TIMEOUT_SECONDS: u64 = 8;
+const ACCOUNT_USAGE_TIMEOUT_SECONDS: u64 = 2;
 const ACCOUNT_USAGE_CACHE_SECONDS: i64 = 30;
 const ACCOUNT_USAGE_ERROR_CACHE_SECONDS: i64 = 10;
 const CLAUDE_STATE_FILE: &str = "claude-status.json";
@@ -238,8 +238,12 @@ struct CachedSession {
 }
 
 #[tauri::command]
-fn get_usage_snapshot() -> Result<UsageSnapshot, String> {
-    collect_usage_snapshot().map_err(|error| error.to_string())
+async fn get_usage_snapshot() -> Result<UsageSnapshot, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        collect_usage_snapshot().map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| format!("Usage snapshot task failed: {error}"))?
 }
 
 #[tauri::command]

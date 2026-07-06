@@ -33,6 +33,7 @@ const BEE_MOTION_DECELERATION_PER_SECOND = 1.7;
 const BEE_MOTION_IDLE_DECAY_PER_SECOND = 0.14;
 const BEE_MOTION_STOP_RATIO = 0.012;
 const BEE_MOTION_RENDER_EPSILON = 0.0015;
+const USAGE_POLL_INTERVAL_MS = 2000;
 // Static bees perch inside the minimum active orbit radius, with feet against the frame.
 const BEE_STATIC_PLACEMENTS = [
   { xPx: -12, yPx: 19, rotationDeg: 173, scale: 0.9, flipX: false },
@@ -73,7 +74,7 @@ export function App() {
       }
 
       if (alive) {
-        pollTimer = window.setTimeout(poll, 1000);
+        pollTimer = window.setTimeout(poll, USAGE_POLL_INTERVAL_MS);
       }
     }
 
