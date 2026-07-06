@@ -232,10 +232,11 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   const animationRate = snapshot.animationBurnRatePerMin;
   const speedRatio = ratePercent(animationRate);
   const motionRatio = beeMotionRatio(speedRatio);
+  const activeMotion = motionRatio > 0;
   const speed = speedRatio * 100;
   const primary = clampPercent(snapshot.primary?.remainingPercent);
   const secondary = clampPercent(snapshot.secondary?.remainingPercent);
-  const live = Math.max(0.08, motionRatio);
+  const live = activeMotion ? Math.max(0.08, motionRatio) : 0;
   const trailIntensity = beeTrailIntensity(motionRatio);
   const wingSpeed = `${beeWingDurationMs(motionRatio)}ms`;
   const orbitRadius = beeOrbitRadiusPx(motionRatio);
@@ -243,6 +244,7 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   const orbitTargetRef = useRef({
     durationSeconds: orbitDuration,
     radius: orbitRadius,
+    active: activeMotion,
   });
   const orbitStateRef = useRef({
     angle: 0,
@@ -257,8 +259,9 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
     orbitTargetRef.current = {
       durationSeconds: orbitDuration,
       radius: orbitRadius,
+      active: activeMotion,
     };
-  }, [orbitDuration, orbitRadius]);
+  }, [activeMotion, orbitDuration, orbitRadius]);
 
   useEffect(() => {
     let frameId = 0;
@@ -279,10 +282,12 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
       const smoothing = 1 - Math.exp(-frameSeconds * BEE_ORBIT_SMOOTHING_PER_SECOND);
       state.currentDurationSeconds += (target.durationSeconds - state.currentDurationSeconds) * smoothing;
       state.currentRadius += (target.radius - state.currentRadius) * smoothing;
-      state.angle = (
-        state.angle
-        + (frameSeconds * 360) / Math.max(0.2, state.currentDurationSeconds)
-      ) % 360;
+      if (target.active) {
+        state.angle = (
+          state.angle
+          + (frameSeconds * 360) / Math.max(0.2, state.currentDurationSeconds)
+        ) % 360;
+      }
 
       const bees = meterRef.current?.querySelectorAll<HTMLElement>(".bee-unit");
       bees?.forEach((bee) => {
@@ -333,7 +338,7 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   return (
     <div
       ref={meterRef}
-      className="living-meter image-living hive-meter hive-compact"
+      className={`living-meter image-living hive-meter hive-compact${activeMotion ? "" : " bee-static"}`}
       data-tauri-drag-region="deep"
       style={
         {
@@ -632,7 +637,11 @@ function ratePercent(rate: number) {
 }
 
 function beeMotionRatio(speedRatio: number) {
-  return Math.min(1, Math.max(BEE_ORBIT_IDLE_RATIO, speedRatio));
+  const safeRatio = Number.isFinite(speedRatio) ? Math.max(0, speedRatio) : 0;
+  if (safeRatio <= 0) {
+    return 0;
+  }
+  return Math.min(1, Math.max(BEE_ORBIT_IDLE_RATIO, safeRatio));
 }
 
 function beeOrbitDurationSeconds(motionRatio: number) {

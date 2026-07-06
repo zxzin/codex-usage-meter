@@ -344,6 +344,11 @@ button {
   z-index: 2;
 }
 
+.hive-meter.bee-static .bee-wing-layer {
+  animation-play-state: paused;
+  opacity: 0.86;
+}
+
 .loading-meter {
   gap: 10px;
   color: var(--muted);
