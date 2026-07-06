@@ -28,7 +28,11 @@ const BEE_ORBIT_FAST_RADIUS_PX = 38;
 const BEE_ORBIT_RADIUS_CURVE = 1.35;
 const BEE_ORBIT_SMOOTHING_PER_SECOND = 7;
 const BEE_ORBIT_MAX_FRAME_SECONDS = 0.05;
-const BEE_MOTION_COAST_MS = 2000;
+const BEE_MOTION_ACCELERATION_PER_SECOND = 7;
+const BEE_MOTION_DECELERATION_PER_SECOND = 1.7;
+const BEE_MOTION_IDLE_DECAY_PER_SECOND = 0.14;
+const BEE_MOTION_STOP_RATIO = 0.012;
+const BEE_MOTION_RENDER_EPSILON = 0.0015;
 // Static bees perch inside the minimum active orbit radius, with feet against the frame.
 const BEE_STATIC_PLACEMENTS = [
   { xPx: -12, yPx: 19, rotationDeg: 173, scale: 0.9, flipX: false },
@@ -243,7 +247,7 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   const tokenSpeedRatio = ratePercent(snapshot.burnRatePerMin);
   const tokenMotionRatio = beeMotionRatio(tokenSpeedRatio);
   const motionRatio = useBeeMotionRatio(tokenMotionRatio);
-  const activeMotion = motionRatio > 0;
+  const activeMotion = motionRatio > BEE_MOTION_STOP_RATIO;
   const speed = motionRatio * 100;
   const primary = clampPercent(snapshot.primary?.remainingPercent);
   const secondary = clampPercent(snapshot.secondary?.remainingPercent);
@@ -661,34 +665,71 @@ function ratePercent(rate: number) {
 
 function useBeeMotionRatio(tokenMotionRatio: number) {
   const [visibleMotionRatio, setVisibleMotionRatio] = useState(tokenMotionRatio);
-  const lastMeasuredMotionRatioRef = useRef(tokenMotionRatio);
+  const targetMotionRatioRef = useRef(tokenMotionRatio);
+  const visibleMotionRatioRef = useRef(tokenMotionRatio);
+  const renderedMotionRatioRef = useRef(tokenMotionRatio);
 
   useEffect(() => {
-    const safeTokenMotionRatio = Math.min(1, Math.max(0, tokenMotionRatio));
-
-    if (safeTokenMotionRatio > 0) {
-      lastMeasuredMotionRatioRef.current = safeTokenMotionRatio;
-      setVisibleMotionRatio(safeTokenMotionRatio);
-      return;
-    }
-
-    if (lastMeasuredMotionRatioRef.current <= 0) {
-      setVisibleMotionRatio(0);
-      return;
-    }
-
-    setVisibleMotionRatio(lastMeasuredMotionRatioRef.current);
-    const coastTimer = window.setTimeout(() => {
-      lastMeasuredMotionRatioRef.current = 0;
-      setVisibleMotionRatio(0);
-    }, BEE_MOTION_COAST_MS);
-
-    return () => {
-      window.clearTimeout(coastTimer);
-    };
+    targetMotionRatioRef.current = Math.min(1, Math.max(0, tokenMotionRatio));
   }, [tokenMotionRatio]);
 
+  useEffect(() => {
+    let frameId = 0;
+    let lastTime = 0;
+
+    const tick = (time: number) => {
+      if (!lastTime) {
+        lastTime = time;
+      }
+
+      const frameSeconds = Math.min(
+        BEE_ORBIT_MAX_FRAME_SECONDS,
+        Math.max(0, (time - lastTime) / 1000),
+      );
+      lastTime = time;
+
+      const current = visibleMotionRatioRef.current;
+      const target = targetMotionRatioRef.current;
+      const next = nextBeeMotionRatio(current, target, frameSeconds);
+      visibleMotionRatioRef.current = next;
+
+      if (Math.abs(next - renderedMotionRatioRef.current) >= BEE_MOTION_RENDER_EPSILON || next === 0) {
+        renderedMotionRatioRef.current = next;
+        setVisibleMotionRatio(next);
+      }
+
+      frameId = window.requestAnimationFrame(tick);
+    };
+
+    frameId = window.requestAnimationFrame(tick);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, []);
+
   return visibleMotionRatio;
+}
+
+function nextBeeMotionRatio(current: number, target: number, frameSeconds: number) {
+  const safeCurrent = Math.min(1, Math.max(0, current));
+  const safeTarget = Math.min(1, Math.max(0, target));
+  const safeFrameSeconds = Math.min(
+    BEE_ORBIT_MAX_FRAME_SECONDS,
+    Math.max(0, frameSeconds),
+  );
+
+  if (safeTarget <= 0) {
+    const next = safeCurrent * Math.exp(-safeFrameSeconds * BEE_MOTION_IDLE_DECAY_PER_SECOND);
+    return next <= BEE_MOTION_STOP_RATIO ? 0 : next;
+  }
+
+  const speed =
+    safeTarget > safeCurrent
+      ? BEE_MOTION_ACCELERATION_PER_SECOND
+      : BEE_MOTION_DECELERATION_PER_SECOND;
+  const smoothing = 1 - Math.exp(-safeFrameSeconds * speed);
+  return safeCurrent + (safeTarget - safeCurrent) * smoothing;
 }
 
 function beeMotionRatio(speedRatio: number) {
