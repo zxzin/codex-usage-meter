@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
@@ -16,8 +16,6 @@ use walkdir::WalkDir;
 
 const SPEED_WINDOW_SECONDS: i64 = 60;
 const ACTIVE_GRACE_SECONDS: i64 = 90;
-const ACTIVITY_GRACE_SECONDS: i64 = 18;
-const ACTIVITY_WAKE_RATE_PER_MIN: f64 = 24_000.0;
 const RECENT_FILE_SECONDS: u64 = 2 * 24 * 60 * 60;
 const MAX_SESSION_FILES: usize = 120;
 const CODEX_USAGE_ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
@@ -234,8 +232,8 @@ struct AccountUsageCache {
 
 #[derive(Debug, Clone)]
 struct CachedSession {
-    modified: SystemTime,
     len: u64,
+    processed_len: u64,
     scan: Option<SessionScan>,
 }
 
@@ -256,11 +254,7 @@ fn refresh_window_chrome(window: tauri::WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn show_context_menu(
-    window: tauri::Window,
-    x: f64,
-    y: f64,
-) -> Result<(), String> {
+fn show_context_menu(window: tauri::Window, x: f64, y: f64) -> Result<(), String> {
     let app = window.app_handle();
     let reload = MenuItemBuilder::with_id("context-reload", "Reload")
         .build(app)
@@ -448,7 +442,7 @@ fn provider_score(snapshot: &UsageSnapshot) -> (u8, i64, usize) {
         .max()
         .unwrap_or(0);
 
-    let tier = if snapshot.animation_burn_rate_per_min > 0.0 || snapshot.activity_sessions > 0 {
+    let tier = if snapshot.animation_burn_rate_per_min > 0.0 {
         4
     } else if snapshot.active_sessions > 0 {
         3
@@ -537,12 +531,6 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
 
     for scan in sessions {
         let Some(latest) = scan.events.last() else {
-            let animation_rate =
-                animation_rate_for_session(0.0, false, scan.last_activity_ts, 0, now);
-            if animation_rate > 0.0 {
-                activity_sessions += 1;
-                animation_burn_rate_per_min += animation_rate;
-            }
             continue;
         };
         latest_total_tokens = latest_total_tokens.saturating_add(latest.total_tokens);
@@ -557,8 +545,7 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
 
         let (recent_tokens, rate) = recent_delta_and_rate(&scan.events, window_start, now);
         let active = latest.ts >= active_cutoff && recent_tokens > 0;
-        let animation_rate =
-            animation_rate_for_session(rate, active, scan.last_activity_ts, latest.ts, now);
+        let animation_rate = animation_rate_for_session(rate, active);
         if animation_rate > 0.0 {
             activity_sessions += 1;
             animation_burn_rate_per_min += animation_rate;
@@ -740,8 +727,7 @@ fn collect_claude_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::
         }
 
         let active = last_event_at >= active_cutoff && recent_tokens > 0;
-        let animation_rate =
-            animation_rate_for_session(rate, active, updated_at, last_event_at, now);
+        let animation_rate = animation_rate_for_session(rate, active);
         if animation_rate > 0.0 {
             activity_sessions += 1;
             animation_burn_rate_per_min += animation_rate;
@@ -1145,89 +1131,96 @@ fn recent_session_files(sessions_dir: &Path) -> Result<Vec<PathBuf>, Box<dyn std
 fn scan_session_file(path: &Path) -> Result<Option<SessionScan>, Box<dyn std::error::Error>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
-    let fallback_id = path
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("unknown-session")
-        .to_string();
-    let mut id = fallback_id;
-    let mut cwd = None;
-    let mut events = Vec::new();
-    let mut last_activity_ts = 0_i64;
+    let mut scan = empty_session_scan(path);
 
     for line in reader.lines() {
-        let line = line?;
-        let fast_ts = timestamp_from_line(&line);
-        if let Some(ts) = fast_ts {
-            last_activity_ts = last_activity_ts.max(ts);
-        }
-
-        if !(line.contains("session_meta") || line.contains("\"token_count\"")) {
-            continue;
-        }
-
-        let Ok(value) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-
-        let event_ts = fast_ts.or_else(|| timestamp_from_value(&value));
-        if let Some(ts) = event_ts {
-            last_activity_ts = last_activity_ts.max(ts);
-        }
-
-        match value.get("type").and_then(Value::as_str) {
-            Some("session_meta") => {
-                if let Some(payload) = value.get("payload") {
-                    if let Some(payload_id) = payload
-                        .get("id")
-                        .or_else(|| payload.get("session_id"))
-                        .and_then(Value::as_str)
-                    {
-                        id = payload_id.to_string();
-                    }
-                    cwd = payload
-                        .get("cwd")
-                        .and_then(Value::as_str)
-                        .map(ToString::to_string);
-                }
-            }
-            Some("event_msg") => {
-                let Some(payload) = value.get("payload") else {
-                    continue;
-                };
-                if payload.get("type").and_then(Value::as_str) != Some("token_count") {
-                    continue;
-                }
-                let Some(ts) = event_ts else {
-                    continue;
-                };
-                let total_tokens = payload
-                    .pointer("/info/total_token_usage/total_tokens")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0);
-
-                events.push(TokenEvent {
-                    ts,
-                    total_tokens,
-                    rate_limits: parse_rate_limits(payload.get("rate_limits")),
-                });
-            }
-            _ => {}
-        }
+        apply_session_line(&mut scan, &line?);
     }
 
-    if events.is_empty() && last_activity_ts == 0 {
-        return Ok(None);
-    }
+    Ok(finalize_session_scan(scan))
+}
 
-    events.sort_by(|a, b| a.ts.cmp(&b.ts));
-    Ok(Some(SessionScan {
-        id,
-        cwd,
+fn empty_session_scan(path: &Path) -> SessionScan {
+    SessionScan {
+        id: path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("unknown-session")
+            .to_string(),
+        cwd: None,
         path: path.to_path_buf(),
-        events,
-        last_activity_ts,
-    }))
+        events: Vec::new(),
+        last_activity_ts: 0,
+    }
+}
+
+fn apply_session_line(scan: &mut SessionScan, line: &str) {
+    let fast_ts = timestamp_from_line(line);
+    if let Some(ts) = fast_ts {
+        scan.last_activity_ts = scan.last_activity_ts.max(ts);
+    }
+
+    if !(line.contains("session_meta") || line.contains("\"token_count\"")) {
+        return;
+    }
+
+    let Ok(value) = serde_json::from_str::<Value>(line) else {
+        return;
+    };
+
+    let event_ts = fast_ts.or_else(|| timestamp_from_value(&value));
+    if let Some(ts) = event_ts {
+        scan.last_activity_ts = scan.last_activity_ts.max(ts);
+    }
+
+    match value.get("type").and_then(Value::as_str) {
+        Some("session_meta") => {
+            if let Some(payload) = value.get("payload") {
+                if let Some(payload_id) = payload
+                    .get("id")
+                    .or_else(|| payload.get("session_id"))
+                    .and_then(Value::as_str)
+                {
+                    scan.id = payload_id.to_string();
+                }
+                scan.cwd = payload
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string);
+            }
+        }
+        Some("event_msg") => {
+            let Some(payload) = value.get("payload") else {
+                return;
+            };
+            if payload.get("type").and_then(Value::as_str) != Some("token_count") {
+                return;
+            }
+            let Some(ts) = event_ts else {
+                return;
+            };
+            let total_tokens = payload
+                .pointer("/info/total_token_usage/total_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+
+            scan.events.push(TokenEvent {
+                ts,
+                total_tokens,
+                rate_limits: parse_rate_limits(payload.get("rate_limits")),
+            });
+        }
+        _ => {}
+    }
+}
+
+fn finalize_session_scan(mut scan: SessionScan) -> Option<SessionScan> {
+    if scan.events.is_empty() && scan.last_activity_ts == 0 {
+        return None;
+    }
+
+    scan.events.sort_by(|a, b| a.ts.cmp(&b.ts));
+    Some(scan)
 }
 
 fn timestamp_from_line(line: &str) -> Option<i64> {
@@ -1255,7 +1248,6 @@ fn scan_session_file_cached(
     path: &Path,
 ) -> Result<Option<SessionScan>, Box<dyn std::error::Error>> {
     let metadata = fs::metadata(path)?;
-    let modified = metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH);
     let len = metadata.len();
     let key = path.to_path_buf();
 
@@ -1265,13 +1257,64 @@ fn scan_session_file_cached(
         .ok()
         .and_then(|cache| cache.entries.get(&key).cloned())
     {
-        if cached.modified == modified && cached.len == len {
+        if cached.len == len {
             return Ok(cached.scan);
+        }
+
+        if len > cached.processed_len {
+            let scan = scan_session_file_append(path, &cached, len)?;
+            cache_session_scan(key, len, scan.processed_len, scan.scan.clone());
+            return Ok(scan.scan);
         }
     }
 
     let scan = scan_session_file(path)?;
+    let processed_len = len;
 
+    cache_session_scan(key, len, processed_len, scan.clone());
+
+    Ok(scan)
+}
+
+struct IncrementalSessionScan {
+    scan: Option<SessionScan>,
+    processed_len: u64,
+}
+
+fn scan_session_file_append(
+    path: &Path,
+    cached: &CachedSession,
+    len: u64,
+) -> Result<IncrementalSessionScan, Box<dyn std::error::Error>> {
+    if len < cached.processed_len {
+        return Ok(IncrementalSessionScan {
+            scan: scan_session_file(path)?,
+            processed_len: len,
+        });
+    }
+
+    let mut scan = cached
+        .scan
+        .clone()
+        .unwrap_or_else(|| empty_session_scan(path));
+    let mut file = File::open(path)?;
+    file.seek(SeekFrom::Start(cached.processed_len))?;
+    let mut appended = String::new();
+    file.read_to_string(&mut appended)?;
+
+    let complete_len = appended.rfind('\n').map(|index| index + 1).unwrap_or(0);
+    let complete_append = &appended[..complete_len];
+    for line in complete_append.lines() {
+        apply_session_line(&mut scan, line);
+    }
+
+    Ok(IncrementalSessionScan {
+        scan: finalize_session_scan(scan),
+        processed_len: cached.processed_len + complete_len as u64,
+    })
+}
+
+fn cache_session_scan(key: PathBuf, len: u64, processed_len: u64, scan: Option<SessionScan>) {
     if let Ok(mut cache) = SCAN_CACHE
         .get_or_init(|| Mutex::new(ScanCache::default()))
         .lock()
@@ -1279,14 +1322,12 @@ fn scan_session_file_cached(
         cache.entries.insert(
             key,
             CachedSession {
-                modified,
                 len,
-                scan: scan.clone(),
+                processed_len,
+                scan,
             },
         );
     }
-
-    Ok(scan)
 }
 
 fn prune_scan_cache(files: &[PathBuf]) {
@@ -1348,22 +1389,12 @@ fn recent_delta_and_rate(events: &[TokenEvent], window_start: i64, now: i64) -> 
     (delta, rate)
 }
 
-fn animation_rate_for_session(
-    token_rate: f64,
-    token_active: bool,
-    last_activity_ts: i64,
-    latest_token_ts: i64,
-    now: i64,
-) -> f64 {
-    let mut rate = if token_active { token_rate } else { 0.0 };
-    let has_fresh_non_token_activity =
-        last_activity_ts > latest_token_ts && last_activity_ts >= now - ACTIVITY_GRACE_SECONDS;
-
-    if has_fresh_non_token_activity {
-        rate = rate.max(ACTIVITY_WAKE_RATE_PER_MIN);
+fn animation_rate_for_session(token_rate: f64, token_active: bool) -> f64 {
+    if token_active {
+        token_rate
+    } else {
+        0.0
     }
-
-    rate
 }
 
 fn derive_state(
@@ -1470,6 +1501,98 @@ mod tests {
     }
 
     #[test]
+    fn scan_cache_reads_appended_session_tail() {
+        let path = std::env::temp_dir().join(format!(
+            "token-meter-incremental-{}.jsonl",
+            std::process::id()
+        ));
+        let first = concat!(
+            r#"{"timestamp":"2026-06-27T09:00:00Z","type":"session_meta","payload":{"id":"scan-test","cwd":"/tmp/project"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-06-27T09:00:10Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100}}}}"#,
+            "\n"
+        );
+        std::fs::write(&path, first).expect("write initial session");
+
+        let initial = scan_session_file_cached(&path)
+            .expect("initial cached scan")
+            .expect("initial scan should exist");
+        assert_eq!(initial.events.len(), 1);
+        assert_eq!(initial.events[0].total_tokens, 100);
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open append session");
+        use std::io::Write;
+        writeln!(
+            file,
+            r#"{{"timestamp":"2026-06-27T09:00:20Z","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"total_tokens":250}}}}}}}}"#
+        )
+        .expect("append token count");
+
+        let updated = scan_session_file_cached(&path)
+            .expect("updated cached scan")
+            .expect("updated scan should exist");
+        let _ = std::fs::remove_file(path);
+
+        assert_eq!(updated.id, "scan-test");
+        assert_eq!(updated.cwd.as_deref(), Some("/tmp/project"));
+        assert_eq!(updated.events.len(), 2);
+        assert_eq!(updated.events[1].total_tokens, 250);
+    }
+
+    #[test]
+    fn scan_cache_keeps_partial_appended_line_until_complete() {
+        let path =
+            std::env::temp_dir().join(format!("token-meter-partial-{}.jsonl", std::process::id()));
+        let first = concat!(
+            r#"{"timestamp":"2026-06-27T09:00:00Z","type":"session_meta","payload":{"id":"partial-test"}}"#,
+            "\n",
+            r#"{"timestamp":"2026-06-27T09:00:10Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":100}}}}"#,
+            "\n"
+        );
+        std::fs::write(&path, first).expect("write initial partial session");
+
+        let initial = scan_session_file_cached(&path)
+            .expect("initial partial scan")
+            .expect("initial partial scan should exist");
+        assert_eq!(initial.events.len(), 1);
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open partial append session");
+        use std::io::Write;
+        write!(
+            file,
+            r#"{{"timestamp":"2026-06-27T09:00:20Z","type":"event_msg","payload":{{"type":"token_count","info":{{"total_token_usage":{{"total_tokens":"#
+        )
+        .expect("append partial token count");
+        drop(file);
+
+        let partial = scan_session_file_cached(&path)
+            .expect("partial cached scan")
+            .expect("partial scan should still exist");
+        assert_eq!(partial.events.len(), 1);
+
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open completed append session");
+        writeln!(file, r#"275}}}}}}}}"#).expect("finish partial token count");
+
+        let complete = scan_session_file_cached(&path)
+            .expect("complete cached scan")
+            .expect("complete scan should exist");
+        let _ = std::fs::remove_file(path);
+
+        assert_eq!(complete.id, "partial-test");
+        assert_eq!(complete.events.len(), 2);
+        assert_eq!(complete.events[1].total_tokens, 275);
+    }
+
+    #[test]
     fn recent_rate_uses_now_so_stopped_sessions_decay() {
         let events = vec![event(1_000, 1_000), event(1_030, 4_000)];
         let (delta, rate) = recent_delta_and_rate(&events, 990, 1_050);
@@ -1497,22 +1620,15 @@ mod tests {
     }
 
     #[test]
-    fn animation_rate_wakes_on_fresh_activity_before_token_count() {
-        let rate = animation_rate_for_session(0.0, false, 1_010, 1_000, 1_012);
-
-        assert_rate(rate, ACTIVITY_WAKE_RATE_PER_MIN);
-    }
-
-    #[test]
-    fn animation_rate_does_not_wake_on_stale_activity() {
-        let rate = animation_rate_for_session(0.0, false, 1_010, 1_000, 1_040);
+    fn animation_rate_ignores_non_token_activity() {
+        let rate = animation_rate_for_session(0.0, false);
 
         assert_eq!(rate, 0.0);
     }
 
     #[test]
-    fn animation_rate_keeps_real_token_rate_when_higher_than_wake_floor() {
-        let rate = animation_rate_for_session(80_000.0, true, 1_010, 1_000, 1_012);
+    fn animation_rate_keeps_real_token_rate() {
+        let rate = animation_rate_for_session(80_000.0, true);
 
         assert_rate(rate, 80_000.0);
     }

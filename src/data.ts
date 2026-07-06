@@ -7,12 +7,18 @@ export async function getUsageSnapshot(): Promise<UsageSnapshot> {
   try {
     return await invoke<UsageSnapshot>("get_usage_snapshot");
   } catch (error) {
-    if (!previewWarningShown) {
-      previewWarningShown = true;
-      console.warn("Using browser preview mock data:", error);
-    }
     const previewMode = new URLSearchParams(window.location.search).get("mock");
-    return mockSnapshot(previewMode === "idle");
+    if (previewMode != null) {
+      if (!previewWarningShown) {
+        previewWarningShown = true;
+        console.warn("Using explicit browser preview mock data:", error);
+      }
+      return mockSnapshot(previewMode === "idle");
+    }
+
+    throw new Error(
+      "Real token usage is only available in the Token Meter desktop app. Browser preview has no Tauri usage bridge; add ?mock=live or ?mock=idle only for visual preview.",
+    );
   }
 }
 

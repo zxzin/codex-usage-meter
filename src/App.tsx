@@ -28,11 +28,12 @@ const BEE_ORBIT_FAST_RADIUS_PX = 38;
 const BEE_ORBIT_RADIUS_CURVE = 1.35;
 const BEE_ORBIT_SMOOTHING_PER_SECOND = 7;
 const BEE_ORBIT_MAX_FRAME_SECONDS = 0.05;
-// Static bees perch by foot contact on the visible honeycomb frame.
+const BEE_MOTION_COAST_MS = 2000;
+// Static bees perch inside the minimum active orbit radius, with feet against the frame.
 const BEE_STATIC_PLACEMENTS = [
-  { xPx: -38, yPx: 11, rotationDeg: -7, scale: 0.9, flipX: false },
-  { xPx: 6, yPx: -23, rotationDeg: 5, scale: 0.82, flipX: false },
-  { xPx: 29, yPx: 12, rotationDeg: 6, scale: 0.88, flipX: true },
+  { xPx: -12, yPx: 19, rotationDeg: 173, scale: 0.9, flipX: false },
+  { xPx: 3, yPx: -19, rotationDeg: 5, scale: 0.82, flipX: false },
+  { xPx: 12, yPx: 19, rotationDeg: 187, scale: 0.88, flipX: true },
 ] as const;
 
 export function App() {
@@ -52,6 +53,7 @@ export function App() {
 
   useEffect(() => {
     let alive = true;
+    let pollTimer = 0;
 
     async function poll() {
       try {
@@ -65,13 +67,16 @@ export function App() {
           setError(err instanceof Error ? err.message : String(err));
         }
       }
+
+      if (alive) {
+        pollTimer = window.setTimeout(poll, 1000);
+      }
     }
 
     poll();
-    const timer = window.setInterval(poll, 1000);
     return () => {
       alive = false;
-      window.clearInterval(timer);
+      window.clearTimeout(pollTimer);
     };
   }, []);
 
@@ -235,11 +240,11 @@ function LoadingMeter({ labels }: { labels: Labels }) {
 
 function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   const meterRef = useRef<HTMLDivElement | null>(null);
-  const animationRate = snapshot.animationBurnRatePerMin;
-  const speedRatio = ratePercent(animationRate);
-  const motionRatio = beeMotionRatio(speedRatio);
+  const tokenSpeedRatio = ratePercent(snapshot.burnRatePerMin);
+  const tokenMotionRatio = beeMotionRatio(tokenSpeedRatio);
+  const motionRatio = useBeeMotionRatio(tokenMotionRatio);
   const activeMotion = motionRatio > 0;
-  const speed = speedRatio * 100;
+  const speed = motionRatio * 100;
   const primary = clampPercent(snapshot.primary?.remainingPercent);
   const secondary = clampPercent(snapshot.secondary?.remainingPercent);
   const live = activeMotion ? Math.max(0.08, motionRatio) : 0;
@@ -652,6 +657,38 @@ function ratePercent(rate: number) {
     Math.log1p(safeRate / BEE_SPEED_LOG_BASE_RATE_PER_MIN)
     / Math.log1p(BEE_SPEED_FULL_RATE_PER_MIN / BEE_SPEED_LOG_BASE_RATE_PER_MIN);
   return Math.min(1, Math.max(0, normalized));
+}
+
+function useBeeMotionRatio(tokenMotionRatio: number) {
+  const [visibleMotionRatio, setVisibleMotionRatio] = useState(tokenMotionRatio);
+  const lastMeasuredMotionRatioRef = useRef(tokenMotionRatio);
+
+  useEffect(() => {
+    const safeTokenMotionRatio = Math.min(1, Math.max(0, tokenMotionRatio));
+
+    if (safeTokenMotionRatio > 0) {
+      lastMeasuredMotionRatioRef.current = safeTokenMotionRatio;
+      setVisibleMotionRatio(safeTokenMotionRatio);
+      return;
+    }
+
+    if (lastMeasuredMotionRatioRef.current <= 0) {
+      setVisibleMotionRatio(0);
+      return;
+    }
+
+    setVisibleMotionRatio(lastMeasuredMotionRatioRef.current);
+    const coastTimer = window.setTimeout(() => {
+      lastMeasuredMotionRatioRef.current = 0;
+      setVisibleMotionRatio(0);
+    }, BEE_MOTION_COAST_MS);
+
+    return () => {
+      window.clearTimeout(coastTimer);
+    };
+  }, [tokenMotionRatio]);
+
+  return visibleMotionRatio;
 }
 
 function beeMotionRatio(speedRatio: number) {
