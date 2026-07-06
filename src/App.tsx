@@ -28,6 +28,11 @@ const BEE_ORBIT_FAST_RADIUS_PX = 38;
 const BEE_ORBIT_RADIUS_CURVE = 1.35;
 const BEE_ORBIT_SMOOTHING_PER_SECOND = 7;
 const BEE_ORBIT_MAX_FRAME_SECONDS = 0.05;
+const BEE_STATIC_PLACEMENTS = [
+  { xPx: -38, yPx: 23, rotationDeg: -10, scale: 0.9, flipX: false },
+  { xPx: 6, yPx: -24, rotationDeg: 5, scale: 0.82, flipX: false },
+  { xPx: 41, yPx: 11, rotationDeg: -7, scale: 0.88, flipX: true },
+] as const;
 
 export function App() {
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null);
@@ -291,6 +296,17 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
 
       const bees = meterRef.current?.querySelectorAll<HTMLElement>(".bee-unit");
       bees?.forEach((bee) => {
+        const staticIndex = Number(bee.dataset.staticIndex ?? 0);
+        if (!target.active) {
+          const placement = beeStaticPlacement(staticIndex);
+          bee.style.left = "50%";
+          bee.style.top = "50%";
+          bee.style.transform = beeStaticTransform(placement);
+          return;
+        }
+
+        bee.style.left = "50%";
+        bee.style.top = "50%";
         const angleOffset = Number(bee.dataset.angleOffset ?? 0);
         const safeOffset = Number.isFinite(angleOffset) ? angleOffset : 0;
         bee.style.transform = beeOrbitTransform(state.angle + safeOffset, state.currentRadius);
@@ -311,6 +327,7 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
         key={`${layerClass || "main"}-${index}`}
         className={`bee-unit b${index + 1}${layerClass ? ` ${layerClass}` : ""}`}
         data-angle-offset={angleOffset}
+        data-static-index={index}
         style={
           {
             left: "50%",
@@ -670,6 +687,16 @@ function beeOrbitRadiusPx(motionRatio: number) {
 
 function beeOrbitTransform(angleDeg: number, radiusPx: number) {
   return `translate(-50%, -50%) rotate(${angleDeg.toFixed(3)}deg) translateX(${radiusPx.toFixed(2)}px) rotate(96deg) scale(0.96)`;
+}
+
+function beeStaticPlacement(index: number) {
+  const safeIndex = Number.isFinite(index) ? Math.max(0, Math.trunc(index)) : 0;
+  return BEE_STATIC_PLACEMENTS[safeIndex % BEE_STATIC_PLACEMENTS.length];
+}
+
+function beeStaticTransform(placement: (typeof BEE_STATIC_PLACEMENTS)[number]) {
+  const direction = placement.flipX ? -1 : 1;
+  return `translate(-50%, -50%) translate(${placement.xPx}px, ${placement.yPx}px) rotate(${placement.rotationDeg}deg) scaleX(${direction}) scale(${placement.scale})`;
 }
 
 function clampPercent(value?: number | null) {

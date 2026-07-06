@@ -11,23 +11,24 @@ export async function getUsageSnapshot(): Promise<UsageSnapshot> {
       previewWarningShown = true;
       console.warn("Using browser preview mock data:", error);
     }
-    return mockSnapshot();
+    const previewMode = new URLSearchParams(window.location.search).get("mock");
+    return mockSnapshot(previewMode === "idle");
   }
 }
 
-function mockSnapshot(): UsageSnapshot {
+function mockSnapshot(idle = false): UsageSnapshot {
   const now = Math.floor(Date.now() / 1000);
   return {
     generatedAt: now,
-    burnRatePerMin: 42000,
-    animationBurnRatePerMin: 42000,
-    state: "live",
-    activeSessions: 3,
-    activitySessions: 3,
+    burnRatePerMin: idle ? 0 : 42000,
+    animationBurnRatePerMin: idle ? 0 : 42000,
+    state: idle ? "idle" : "live",
+    activeSessions: idle ? 0 : 3,
+    activitySessions: idle ? 0 : 3,
     observedSessions: 7,
     windowSeconds: 60,
     activeGraceSeconds: 90,
-    totalRecentTokens: 42000,
+    totalRecentTokens: idle ? 0 : 42000,
     latestTotalTokens: 860000,
     primary: {
       usedPercent: 20,
@@ -49,9 +50,9 @@ function mockSnapshot(): UsageSnapshot {
         path: "~/.codex/sessions/preview-1.jsonl",
         lastSeen: now - 8,
         totalTokens: 240000,
-        recentTokens: 22000,
-        burnRatePerMin: 22000,
-        active: true,
+        recentTokens: idle ? 0 : 22000,
+        burnRatePerMin: idle ? 0 : 22000,
+        active: !idle,
       },
       {
         id: "preview-2",
@@ -59,9 +60,9 @@ function mockSnapshot(): UsageSnapshot {
         path: "~/.codex/sessions/preview-2.jsonl",
         lastSeen: now - 16,
         totalTokens: 180000,
-        recentTokens: 12000,
-        burnRatePerMin: 12000,
-        active: true,
+        recentTokens: idle ? 0 : 12000,
+        burnRatePerMin: idle ? 0 : 12000,
+        active: !idle,
       },
       {
         id: "preview-3",
@@ -69,9 +70,9 @@ function mockSnapshot(): UsageSnapshot {
         path: "~/.codex/sessions/preview-3.jsonl",
         lastSeen: now - 31,
         totalTokens: 90000,
-        recentTokens: 8000,
-        burnRatePerMin: 8000,
-        active: true,
+        recentTokens: idle ? 0 : 8000,
+        burnRatePerMin: idle ? 0 : 8000,
+        active: !idle,
       },
     ],
     source: {
