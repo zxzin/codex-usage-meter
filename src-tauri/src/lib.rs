@@ -969,22 +969,28 @@ fn merge_account_and_session_limits(
                 .to_string(),
         ),
         Err(error) => (
-            session_primary,
-            session_secondary,
+            None,
+            None,
             None,
             format!(
-                "Using local Codex token_count quota fallback; /wham/usage unavailable: {error}"
+                "Codex account quota unavailable; keeping token speed local. /wham/usage unavailable: {error}"
             ),
         ),
     }
 }
 
 fn account_rate_limits_cached(codex_home: &Path, now: i64) -> Result<AccountRateLimits, String> {
+    let mut previous_success = None;
+
     if let Ok(cache) = ACCOUNT_USAGE_CACHE
         .get_or_init(|| Mutex::new(AccountUsageCache::default()))
         .lock()
     {
         if let Some(result) = &cache.result {
+            if let Ok(limits) = result {
+                previous_success = Some(limits.clone());
+            }
+
             let ttl = if result.is_ok() {
                 ACCOUNT_USAGE_CACHE_SECONDS
             } else {
@@ -996,7 +1002,10 @@ fn account_rate_limits_cached(codex_home: &Path, now: i64) -> Result<AccountRate
         }
     }
 
-    let result = fetch_account_rate_limits(codex_home).map_err(|error| error.to_string());
+    let result = match fetch_account_rate_limits(codex_home) {
+        Ok(limits) => Ok(limits),
+        Err(error) => previous_success.ok_or_else(|| error.to_string()),
+    };
 
     if let Ok(mut cache) = ACCOUNT_USAGE_CACHE
         .get_or_init(|| Mutex::new(AccountUsageCache::default()))
@@ -1454,6 +1463,15 @@ mod tests {
         }
     }
 
+    fn limit(used_percent: f64) -> LimitWindow {
+        LimitWindow {
+            used_percent,
+            remaining_percent: (100.0 - used_percent).clamp(0.0, 100.0),
+            window_minutes: Some(300),
+            resets_at: None,
+        }
+    }
+
     #[test]
     fn account_usage_windows_map_to_quota_limits() {
         let limits = account_limits_from_usage(CodexUsageResponse {
@@ -1484,6 +1502,38 @@ mod tests {
         assert_eq!(secondary.remaining_percent, 87.0);
         assert_eq!(secondary.window_minutes, Some(10_080));
         assert_eq!(limits.reset_credits_available, Some(2));
+    }
+
+    #[test]
+    fn failed_account_usage_does_not_fallback_to_session_quota() {
+        let (primary, secondary, reset_credits, message) = merge_account_and_session_limits(
+            Err("timeout".to_string()),
+            Some(limit(0.0)),
+            Some(limit(0.0)),
+        );
+
+        assert!(primary.is_none());
+        assert!(secondary.is_none());
+        assert_eq!(reset_credits, None);
+        assert!(message.contains("Codex account quota unavailable"));
+    }
+
+    #[test]
+    fn account_usage_still_fills_missing_window_from_session_when_successful() {
+        let account_limits = AccountRateLimits {
+            primary: Some(limit(20.0)),
+            secondary: None,
+            reset_credits_available: Some(1),
+        };
+        let (primary, secondary, reset_credits, _) = merge_account_and_session_limits(
+            Ok(account_limits),
+            Some(limit(30.0)),
+            Some(limit(40.0)),
+        );
+
+        assert_eq!(primary.expect("primary").used_percent, 20.0);
+        assert_eq!(secondary.expect("secondary").used_percent, 40.0);
+        assert_eq!(reset_credits, Some(1));
     }
 
     #[test]

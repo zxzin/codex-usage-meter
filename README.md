@@ -167,7 +167,7 @@ Live token speed still comes from local Codex session JSONL files:
 
 On Windows, the app looks for `.codex` under the user's home directory using `HOME`, `USERPROFILE`, or `HOMEDRIVE` + `HOMEPATH`. If Codex is running inside WSL2 and stores data in the Linux home directory, launch Token Meter with `CODEX_HOME` pointing to the directory that contains `auth.json` and `sessions`.
 
-If the account request fails, the app falls back to any rate-limit data found in local `token_count` events.
+If the account request fails, the app keeps the last successful account quota when available. It does not use local `token_count` rate-limit snapshots as authoritative quota data, because old sessions can report stale `0%` usage and make the meter flicker to full.
 
 ### Claude Code
 
