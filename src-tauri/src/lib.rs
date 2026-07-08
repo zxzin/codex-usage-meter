@@ -22,6 +22,7 @@ const CODEX_USAGE_ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
 const ACCOUNT_USAGE_TIMEOUT_SECONDS: u64 = 2;
 const ACCOUNT_USAGE_CACHE_SECONDS: i64 = 30;
 const ACCOUNT_USAGE_ERROR_CACHE_SECONDS: i64 = 10;
+const ACTIVITY_WAKE_RATE_PER_MIN: f64 = 42_000.0;
 const CLAUDE_STATE_FILE: &str = "claude-status.json";
 const CLAUDE_EVENT_MIN_RATE_SECONDS: i64 = 10;
 const CLAUDE_FIVE_HOUR_WINDOW_MINUTES: u64 = 5 * 60;
@@ -563,9 +564,36 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
     let mut activity_sessions = 0_usize;
 
     for scan in sessions {
-        let Some(latest) = scan.events.last() else {
+        let latest = scan.events.last().cloned();
+        let activity_active = scan.last_activity_ts >= active_cutoff;
+        let (recent_tokens, rate) = recent_delta_and_rate(&scan.events, window_start, now);
+        let token_active = latest
+            .as_ref()
+            .is_some_and(|latest| latest.ts >= active_cutoff && recent_tokens > 0);
+        let animation_rate = animation_rate_for_session(rate, token_active, activity_active);
+
+        if animation_rate > 0.0 {
+            activity_sessions += 1;
+            animation_burn_rate_per_min += animation_rate;
+        }
+
+        let Some(latest) = latest else {
+            if activity_active {
+                summaries.push(SessionSummary {
+                    id: scan.id,
+                    cwd: scan.cwd,
+                    path: scan.path.display().to_string(),
+                    last_seen: scan.last_activity_ts,
+                    total_tokens: 0,
+                    recent_tokens: 0,
+                    burn_rate_per_min: 0.0,
+                    active: false,
+                });
+            }
+
             continue;
         };
+
         latest_total_tokens = latest_total_tokens.saturating_add(latest.total_tokens);
 
         if let Some(rate_limits) = &latest.rate_limits {
@@ -576,14 +604,7 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
             }
         }
 
-        let (recent_tokens, rate) = recent_delta_and_rate(&scan.events, window_start, now);
-        let active = latest.ts >= active_cutoff && recent_tokens > 0;
-        let animation_rate = animation_rate_for_session(rate, active);
-        if animation_rate > 0.0 {
-            activity_sessions += 1;
-            animation_burn_rate_per_min += animation_rate;
-        }
-        if active {
+        if token_active {
             total_recent_tokens = total_recent_tokens.saturating_add(recent_tokens);
         }
 
@@ -591,11 +612,11 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
             id: scan.id,
             cwd: scan.cwd,
             path: scan.path.display().to_string(),
-            last_seen: latest.ts,
+            last_seen: latest.ts.max(scan.last_activity_ts),
             total_tokens: latest.total_tokens,
             recent_tokens,
-            burn_rate_per_min: if active { rate } else { 0.0 },
-            active,
+            burn_rate_per_min: if token_active { rate } else { 0.0 },
+            active: token_active,
         });
     }
 
@@ -617,7 +638,7 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
 
     let state = derive_state(
         burn_rate_per_min,
-        active_sessions,
+        active_sessions.max(activity_sessions),
         primary.as_ref(),
         secondary.as_ref(),
         now,
@@ -760,7 +781,7 @@ fn collect_claude_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::
         }
 
         let active = last_event_at >= active_cutoff && recent_tokens > 0;
-        let animation_rate = animation_rate_for_session(rate, active);
+        let animation_rate = animation_rate_for_session(rate, active, active);
         if animation_rate > 0.0 {
             activity_sessions += 1;
             animation_burn_rate_per_min += animation_rate;
@@ -1431,9 +1452,11 @@ fn recent_delta_and_rate(events: &[TokenEvent], window_start: i64, now: i64) -> 
     (delta, rate)
 }
 
-fn animation_rate_for_session(token_rate: f64, token_active: bool) -> f64 {
+fn animation_rate_for_session(token_rate: f64, token_active: bool, activity_active: bool) -> f64 {
     if token_active {
         token_rate
+    } else if activity_active {
+        ACTIVITY_WAKE_RATE_PER_MIN
     } else {
         0.0
     }
@@ -1704,14 +1727,21 @@ mod tests {
 
     #[test]
     fn animation_rate_ignores_non_token_activity() {
-        let rate = animation_rate_for_session(0.0, false);
+        let rate = animation_rate_for_session(0.0, false, false);
 
         assert_eq!(rate, 0.0);
     }
 
     #[test]
+    fn animation_rate_wakes_on_recent_codex_activity() {
+        let rate = animation_rate_for_session(0.0, false, true);
+
+        assert_rate(rate, ACTIVITY_WAKE_RATE_PER_MIN);
+    }
+
+    #[test]
     fn animation_rate_keeps_real_token_rate() {
-        let rate = animation_rate_for_session(80_000.0, true);
+        let rate = animation_rate_for_session(80_000.0, true, true);
 
         assert_rate(rate, 80_000.0);
     }

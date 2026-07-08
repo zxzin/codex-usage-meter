@@ -245,7 +245,7 @@ function LoadingMeter({ labels }: { labels: Labels }) {
 
 function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
   const meterRef = useRef<HTMLDivElement | null>(null);
-  const tokenSpeedRatio = ratePercent(snapshot.burnRatePerMin);
+  const tokenSpeedRatio = ratePercent(snapshot.animationBurnRatePerMin);
   const tokenMotionRatio = beeMotionRatio(tokenSpeedRatio);
   const motionRatio = useBeeMotionRatio(tokenMotionRatio);
   const activeMotion = motionRatio > BEE_MOTION_STOP_RATIO;
