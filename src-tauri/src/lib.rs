@@ -282,7 +282,7 @@ fn show_context_menu(window: tauri::Window, x: f64, y: f64) -> Result<(), String
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_usage_snapshot,
             start_window_drag,
@@ -290,14 +290,30 @@ pub fn run() {
             show_context_menu
         ])
         .setup(|app| {
+            configure_app_activation(app);
             configure_main_window(app);
             app.on_menu_event(|app, event| {
                 handle_context_menu_event(app, event.id().as_ref());
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Token Meter");
+        .build(tauri::generate_context!())
+        .expect("error while building Token Meter");
+
+    app.run(|app, event| {
+        #[cfg(target_os = "macos")]
+        if matches!(event, tauri::RunEvent::Reopen { .. }) {
+            restore_main_window(app);
+        }
+    });
+}
+
+fn configure_app_activation(app: &mut tauri::App) {
+    #[cfg(target_os = "macos")]
+    {
+        app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        let _ = app.handle().set_dock_visibility(true);
+    }
 }
 
 fn context_menu_cache() -> &'static Mutex<Option<tauri::menu::Menu<tauri::Wry>>> {
@@ -332,6 +348,19 @@ fn configure_main_window(app: &tauri::App) {
 
     apply_transparent_window_chrome(&window);
     position_main_window(&window);
+}
+
+#[cfg(target_os = "macos")]
+fn restore_main_window(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    apply_transparent_window_chrome(&window);
+    position_main_window(&window);
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
 }
 
 fn apply_transparent_window_chrome(window: &tauri::WebviewWindow) {
