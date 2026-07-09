@@ -23,6 +23,7 @@ const ACCOUNT_USAGE_TIMEOUT_SECONDS: u64 = 2;
 const ACCOUNT_USAGE_CACHE_SECONDS: i64 = 30;
 const ACCOUNT_USAGE_ERROR_CACHE_SECONDS: i64 = 10;
 const ACTIVITY_WAKE_RATE_PER_MIN: f64 = 42_000.0;
+const CODEX_ACCOUNT_CACHE_FILE: &str = "codex-account-cache.json";
 const CLAUDE_STATE_FILE: &str = "claude-status.json";
 const CLAUDE_EVENT_MIN_RATE_SECONDS: i64 = 10;
 const CLAUDE_FIVE_HOUR_WINDOW_MINUTES: u64 = 5 * 60;
@@ -73,7 +74,7 @@ pub enum UsageProvider {
     Claude,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitWindow {
     used_percent: f64,
@@ -120,11 +121,17 @@ struct RateLimits {
     secondary: Option<LimitWindow>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 struct AccountRateLimits {
     primary: Option<LimitWindow>,
     secondary: Option<LimitWindow>,
     reset_credits_available: Option<u64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct CachedAccountRateLimitsFile {
+    cached_at: i64,
+    limits: AccountRateLimits,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1052,9 +1059,18 @@ fn account_rate_limits_cached(codex_home: &Path, now: i64) -> Result<AccountRate
         }
     }
 
+    let cached_success = read_cached_account_rate_limits();
     let result = match fetch_account_rate_limits(codex_home) {
-        Ok(limits) => Ok(limits),
-        Err(error) => previous_success.ok_or_else(|| error.to_string()),
+        Ok(limits) => {
+            let limits = fill_missing_account_windows(limits, cached_success);
+            if has_account_windows(&limits) {
+                let _ = write_cached_account_rate_limits(&limits, now);
+            }
+            Ok(limits)
+        }
+        Err(error) => previous_success
+            .or(cached_success)
+            .ok_or_else(|| error.to_string()),
     };
 
     if let Ok(mut cache) = ACCOUNT_USAGE_CACHE
@@ -1066,6 +1082,58 @@ fn account_rate_limits_cached(codex_home: &Path, now: i64) -> Result<AccountRate
     }
 
     result
+}
+
+fn fill_missing_account_windows(
+    mut current: AccountRateLimits,
+    fallback: Option<AccountRateLimits>,
+) -> AccountRateLimits {
+    if let Some(fallback) = fallback {
+        if current.primary.is_none() {
+            current.primary = fallback.primary;
+        }
+        if current.secondary.is_none() {
+            current.secondary = fallback.secondary;
+        }
+        if current.reset_credits_available.is_none() {
+            current.reset_credits_available = fallback.reset_credits_available;
+        }
+    }
+
+    current
+}
+
+fn has_account_windows(limits: &AccountRateLimits) -> bool {
+    limits.primary.is_some() || limits.secondary.is_some()
+}
+
+fn codex_account_cache_path() -> PathBuf {
+    usage_meter_home().join(CODEX_ACCOUNT_CACHE_FILE)
+}
+
+fn read_cached_account_rate_limits() -> Option<AccountRateLimits> {
+    let file = File::open(codex_account_cache_path()).ok()?;
+    serde_json::from_reader::<_, CachedAccountRateLimitsFile>(file)
+        .ok()
+        .map(|cache| cache.limits)
+        .filter(has_account_windows)
+}
+
+fn write_cached_account_rate_limits(
+    limits: &AccountRateLimits,
+    now: i64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let path = codex_account_cache_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let cache = CachedAccountRateLimitsFile {
+        cached_at: now,
+        limits: limits.clone(),
+    };
+    fs::write(path, serde_json::to_vec_pretty(&cache)?)?;
+    Ok(())
 }
 
 fn fetch_account_rate_limits(
@@ -1405,6 +1473,14 @@ fn prune_scan_cache(files: &[PathBuf]) {
 
 fn parse_rate_limits(value: Option<&Value>) -> Option<RateLimits> {
     let value = value?;
+    if value
+        .get("limit_id")
+        .and_then(Value::as_str)
+        .is_some_and(|limit_id| limit_id != "codex")
+    {
+        return None;
+    }
+
     Some(RateLimits {
         primary: parse_limit_window(value.get("primary")),
         secondary: parse_limit_window(value.get("secondary")),
@@ -1571,6 +1647,26 @@ mod tests {
     }
 
     #[test]
+    fn missing_account_windows_keep_cached_quota() {
+        let current = AccountRateLimits {
+            primary: None,
+            secondary: Some(limit(50.0)),
+            reset_credits_available: None,
+        };
+        let cached = AccountRateLimits {
+            primary: Some(limit(25.0)),
+            secondary: Some(limit(40.0)),
+            reset_credits_available: Some(2),
+        };
+
+        let stabilized = fill_missing_account_windows(current, Some(cached));
+
+        assert_eq!(stabilized.primary.expect("primary").used_percent, 25.0);
+        assert_eq!(stabilized.secondary.expect("secondary").used_percent, 50.0);
+        assert_eq!(stabilized.reset_credits_available, Some(2));
+    }
+
+    #[test]
     fn account_usage_still_fills_missing_window_from_session_when_successful() {
         let account_limits = AccountRateLimits {
             primary: Some(limit(20.0)),
@@ -1586,6 +1682,41 @@ mod tests {
         assert_eq!(primary.expect("primary").used_percent, 20.0);
         assert_eq!(secondary.expect("secondary").used_percent, 40.0);
         assert_eq!(reset_credits, Some(1));
+    }
+
+    #[test]
+    fn parse_rate_limits_ignores_model_specific_limit_ids() {
+        let value = serde_json::json!({
+            "limit_id": "codex_bengalfox",
+            "primary": {
+                "used_percent": 0.0,
+                "window_minutes": 300,
+                "resets_at": 1_783_489_617
+            },
+            "secondary": {
+                "used_percent": 0.0,
+                "window_minutes": 10_080,
+                "resets_at": 1_784_011_992
+            }
+        });
+
+        assert!(parse_rate_limits(Some(&value)).is_none());
+    }
+
+    #[test]
+    fn parse_rate_limits_keeps_account_limit_id() {
+        let value = serde_json::json!({
+            "limit_id": "codex",
+            "primary": {
+                "used_percent": 16.0,
+                "window_minutes": 300,
+                "resets_at": 1_783_489_617
+            }
+        });
+
+        let limits = parse_rate_limits(Some(&value)).expect("account limits");
+
+        assert_eq!(limits.primary.expect("primary").used_percent, 16.0);
     }
 
     #[test]
