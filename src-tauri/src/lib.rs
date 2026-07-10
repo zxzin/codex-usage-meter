@@ -563,7 +563,6 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
     let active_cutoff = now - ACTIVE_GRACE_SECONDS;
     let mut primary = None;
     let mut secondary = None;
-    let mut latest_rate_ts = i64::MIN;
     let mut latest_total_tokens = 0_u64;
     let mut summaries = Vec::new();
     let mut total_recent_tokens = 0_u64;
@@ -571,6 +570,13 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
     let mut activity_sessions = 0_usize;
 
     for scan in sessions {
+        for event in &scan.events {
+            if let Some(rate_limits) = &event.rate_limits {
+                primary = stabilize_limit_window(rate_limits.primary.clone(), primary, now);
+                secondary = stabilize_limit_window(rate_limits.secondary.clone(), secondary, now);
+            }
+        }
+
         let latest = scan.events.last().cloned();
         let activity_active = scan.last_activity_ts >= active_cutoff;
         let (recent_tokens, rate) = recent_delta_and_rate(&scan.events, window_start, now);
@@ -603,14 +609,6 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
 
         latest_total_tokens = latest_total_tokens.saturating_add(latest.total_tokens);
 
-        if let Some(rate_limits) = &latest.rate_limits {
-            if latest.ts >= latest_rate_ts {
-                primary = rate_limits.primary.clone();
-                secondary = rate_limits.secondary.clone();
-                latest_rate_ts = latest.ts;
-            }
-        }
-
         if token_active {
             total_recent_tokens = total_recent_tokens.saturating_add(recent_tokens);
         }
@@ -641,7 +639,7 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
         .map(|session| session.burn_rate_per_min)
         .sum::<f64>();
     let (primary, secondary, reset_credits_available, source_message) =
-        merge_account_and_session_limits(account_limits, primary, secondary);
+        merge_account_and_session_limits(account_limits, primary, secondary, now);
 
     let state = derive_state(
         burn_rate_per_min,
@@ -1011,6 +1009,7 @@ fn merge_account_and_session_limits(
     account_limits: Result<AccountRateLimits, String>,
     session_primary: Option<LimitWindow>,
     session_secondary: Option<LimitWindow>,
+    now: i64,
 ) -> (
     Option<LimitWindow>,
     Option<LimitWindow>,
@@ -1018,13 +1017,17 @@ fn merge_account_and_session_limits(
     String,
 ) {
     match account_limits {
-        Ok(limits) => (
-            limits.primary.or(session_primary),
-            limits.secondary.or(session_secondary),
-            limits.reset_credits_available,
-            "Reading Codex account quota from /wham/usage; token speed from local session events."
-                .to_string(),
-        ),
+        Ok(limits) => {
+            let primary = stabilize_limit_window(session_primary, limits.primary, now);
+            let secondary = stabilize_limit_window(session_secondary, limits.secondary, now);
+            (
+                primary,
+                secondary,
+                limits.reset_credits_available,
+                "Reading Codex account quota from /wham/usage; token speed from local session events."
+                    .to_string(),
+            )
+        }
         Err(error) => (
             None,
             None,
@@ -1062,7 +1065,7 @@ fn account_rate_limits_cached(codex_home: &Path, now: i64) -> Result<AccountRate
     let cached_success = read_cached_account_rate_limits();
     let result = match fetch_account_rate_limits(codex_home) {
         Ok(limits) => {
-            let limits = fill_missing_account_windows(limits, cached_success);
+            let limits = stabilize_account_limits(limits, cached_success, now);
             if has_account_windows(&limits) {
                 let _ = write_cached_account_rate_limits(&limits, now);
             }
@@ -1084,23 +1087,63 @@ fn account_rate_limits_cached(codex_home: &Path, now: i64) -> Result<AccountRate
     result
 }
 
-fn fill_missing_account_windows(
+fn stabilize_account_limits(
     mut current: AccountRateLimits,
     fallback: Option<AccountRateLimits>,
+    now: i64,
 ) -> AccountRateLimits {
     if let Some(fallback) = fallback {
-        if current.primary.is_none() {
-            current.primary = fallback.primary;
-        }
-        if current.secondary.is_none() {
-            current.secondary = fallback.secondary;
-        }
+        current.primary = stabilize_limit_window(current.primary, fallback.primary, now);
+        current.secondary = stabilize_limit_window(current.secondary, fallback.secondary, now);
         if current.reset_credits_available.is_none() {
             current.reset_credits_available = fallback.reset_credits_available;
         }
     }
 
     current
+}
+
+fn stabilize_limit_window(
+    current: Option<LimitWindow>,
+    previous: Option<LimitWindow>,
+    now: i64,
+) -> Option<LimitWindow> {
+    match (current, previous) {
+        (None, previous) => previous,
+        (current, None) => current,
+        (Some(current), Some(previous)) => {
+            let current_cycle_active = current.resets_at.map_or(true, |resets_at| resets_at > now);
+            let previous_cycle_active =
+                previous.resets_at.map_or(true, |resets_at| resets_at > now);
+
+            if current_cycle_active != previous_cycle_active {
+                return if current_cycle_active {
+                    Some(current)
+                } else {
+                    Some(previous)
+                };
+            }
+
+            if !current_cycle_active && !previous_cycle_active {
+                return if current.resets_at > previous.resets_at {
+                    Some(current)
+                } else {
+                    Some(previous)
+                };
+            }
+
+            let same_window = current.window_minutes.is_none()
+                || previous.window_minutes.is_none()
+                || current.window_minutes == previous.window_minutes;
+            let usage_went_backwards = current.used_percent < previous.used_percent;
+
+            if same_window && previous_cycle_active && usage_went_backwards {
+                Some(previous)
+            } else {
+                Some(current)
+            }
+        }
+    }
 }
 
 fn has_account_windows(limits: &AccountRateLimits) -> bool {
@@ -1600,6 +1643,15 @@ mod tests {
         }
     }
 
+    fn limit_with_reset(used_percent: f64, window_minutes: u64, resets_at: i64) -> LimitWindow {
+        LimitWindow {
+            used_percent,
+            remaining_percent: (100.0 - used_percent).clamp(0.0, 100.0),
+            window_minutes: Some(window_minutes),
+            resets_at: Some(resets_at),
+        }
+    }
+
     #[test]
     fn account_usage_windows_map_to_quota_limits() {
         let limits = account_limits_from_usage(CodexUsageResponse {
@@ -1638,6 +1690,7 @@ mod tests {
             Err("timeout".to_string()),
             Some(limit(0.0)),
             Some(limit(0.0)),
+            0,
         );
 
         assert!(primary.is_none());
@@ -1659,7 +1712,7 @@ mod tests {
             reset_credits_available: Some(2),
         };
 
-        let stabilized = fill_missing_account_windows(current, Some(cached));
+        let stabilized = stabilize_account_limits(current, Some(cached), 0);
 
         assert_eq!(stabilized.primary.expect("primary").used_percent, 25.0);
         assert_eq!(stabilized.secondary.expect("secondary").used_percent, 50.0);
@@ -1667,7 +1720,59 @@ mod tests {
     }
 
     #[test]
-    fn account_usage_still_fills_missing_window_from_session_when_successful() {
+    fn transient_quota_drop_does_not_overwrite_active_cycle() {
+        let now = 1_783_673_398;
+        let current = AccountRateLimits {
+            primary: Some(limit_with_reset(1.0, 300, 1_783_683_659)),
+            secondary: Some(limit_with_reset(0.0, 10_080, 1_784_252_351)),
+            reset_credits_available: Some(3),
+        };
+        let cached = AccountRateLimits {
+            primary: Some(limit_with_reset(52.0, 300, 1_783_683_532)),
+            secondary: Some(limit_with_reset(16.0, 10_080, 1_784_252_324)),
+            reset_credits_available: Some(3),
+        };
+
+        let stabilized = stabilize_account_limits(current, Some(cached), now);
+
+        assert_eq!(stabilized.primary.expect("primary").used_percent, 52.0);
+        assert_eq!(stabilized.secondary.expect("secondary").used_percent, 16.0);
+    }
+
+    #[test]
+    fn quota_drop_is_accepted_after_previous_reset() {
+        let now = 1_783_683_600;
+        let current = AccountRateLimits {
+            primary: Some(limit_with_reset(1.0, 300, 1_783_701_600)),
+            secondary: None,
+            reset_credits_available: Some(3),
+        };
+        let cached = AccountRateLimits {
+            primary: Some(limit_with_reset(52.0, 300, 1_783_683_532)),
+            secondary: None,
+            reset_credits_available: Some(3),
+        };
+
+        let stabilized = stabilize_account_limits(current, Some(cached), now);
+
+        assert_eq!(stabilized.primary.expect("primary").used_percent, 1.0);
+    }
+
+    #[test]
+    fn expired_session_quota_cannot_override_active_account_cycle() {
+        let now = 1_783_683_600;
+        let active_account = limit_with_reset(1.0, 300, 1_783_701_600);
+        let expired_session = limit_with_reset(99.0, 300, 1_783_683_532);
+
+        let stabilized = stabilize_limit_window(Some(expired_session), Some(active_account), now)
+            .expect("active quota");
+
+        assert_eq!(stabilized.used_percent, 1.0);
+        assert_eq!(stabilized.resets_at, Some(1_783_701_600));
+    }
+
+    #[test]
+    fn account_usage_combines_higher_session_window_when_successful() {
         let account_limits = AccountRateLimits {
             primary: Some(limit(20.0)),
             secondary: None,
@@ -1677,11 +1782,32 @@ mod tests {
             Ok(account_limits),
             Some(limit(30.0)),
             Some(limit(40.0)),
+            0,
         );
 
-        assert_eq!(primary.expect("primary").used_percent, 20.0);
+        assert_eq!(primary.expect("primary").used_percent, 30.0);
         assert_eq!(secondary.expect("secondary").used_percent, 40.0);
         assert_eq!(reset_credits, Some(1));
+    }
+
+    #[test]
+    fn higher_session_usage_repairs_transient_account_snapshot() {
+        let now = 1_783_673_398;
+        let account_limits = AccountRateLimits {
+            primary: Some(limit_with_reset(1.0, 300, 1_783_683_659)),
+            secondary: Some(limit_with_reset(0.0, 10_080, 1_784_252_351)),
+            reset_credits_available: Some(3),
+        };
+
+        let (primary, secondary, _, _) = merge_account_and_session_limits(
+            Ok(account_limits),
+            Some(limit_with_reset(52.0, 300, 1_783_683_532)),
+            Some(limit_with_reset(16.0, 10_080, 1_784_252_324)),
+            now,
+        );
+
+        assert_eq!(primary.expect("primary").used_percent, 52.0);
+        assert_eq!(secondary.expect("secondary").used_percent, 16.0);
     }
 
     #[test]
