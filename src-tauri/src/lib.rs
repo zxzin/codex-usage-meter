@@ -22,6 +22,7 @@ const CODEX_USAGE_ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
 const ACCOUNT_USAGE_TIMEOUT_SECONDS: u64 = 6;
 const ACCOUNT_USAGE_CACHE_SECONDS: i64 = 8;
 const ACCOUNT_USAGE_ERROR_CACHE_SECONDS: i64 = 3;
+const ACCOUNT_LIMIT_RESET_DRIFT_SECONDS: u64 = 5 * 60;
 const ACTIVITY_WAKE_RATE_PER_MIN: f64 = 42_000.0;
 const CODEX_ACCOUNT_CACHE_FILE: &str = "codex-account-cache.json";
 const CLAUDE_STATE_FILE: &str = "claude-status.json";
@@ -1135,9 +1136,16 @@ fn stabilize_limit_window(
             let same_window = current.window_minutes.is_none()
                 || previous.window_minutes.is_none()
                 || current.window_minutes == previous.window_minutes;
+            let same_cycle = match (current.resets_at, previous.resets_at) {
+                (Some(current_reset), Some(previous_reset)) => {
+                    current_reset.abs_diff(previous_reset) <= ACCOUNT_LIMIT_RESET_DRIFT_SECONDS
+                }
+                (None, None) => true,
+                _ => false,
+            };
             let usage_went_backwards = current.used_percent < previous.used_percent;
 
-            if same_window && previous_cycle_active && usage_went_backwards {
+            if same_window && same_cycle && previous_cycle_active && usage_went_backwards {
                 Some(previous)
             } else {
                 Some(current)
@@ -1756,6 +1764,25 @@ mod tests {
         let stabilized = stabilize_account_limits(current, Some(cached), now);
 
         assert_eq!(stabilized.primary.expect("primary").used_percent, 1.0);
+    }
+
+    #[test]
+    fn quota_drop_with_shifted_reset_starts_new_cycle() {
+        let now = 1_783_752_634;
+        let current = AccountRateLimits {
+            primary: None,
+            secondary: Some(limit_with_reset(0.0, 10_080, 1_784_356_548)),
+            reset_credits_available: Some(3),
+        };
+        let cached = AccountRateLimits {
+            primary: None,
+            secondary: Some(limit_with_reset(20.0, 10_080, 1_784_252_324)),
+            reset_credits_available: Some(3),
+        };
+
+        let stabilized = stabilize_account_limits(current, Some(cached), now);
+
+        assert_eq!(stabilized.secondary.expect("secondary").used_percent, 0.0);
     }
 
     #[test]
