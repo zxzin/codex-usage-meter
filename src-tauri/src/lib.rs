@@ -1143,6 +1143,19 @@ fn stabilize_limit_window(
                 (None, None) => true,
                 _ => false,
             };
+
+            if same_window && !same_cycle {
+                return match (current.resets_at, previous.resets_at) {
+                    (Some(current_reset), Some(previous_reset))
+                        if current_reset > previous_reset =>
+                    {
+                        Some(current)
+                    }
+                    (Some(_), None) => Some(current),
+                    _ => Some(previous),
+                };
+            }
+
             let usage_went_backwards = current.used_percent < previous.used_percent;
 
             if same_window && same_cycle && previous_cycle_active && usage_went_backwards {
@@ -1783,6 +1796,19 @@ mod tests {
         let stabilized = stabilize_account_limits(current, Some(cached), now);
 
         assert_eq!(stabilized.secondary.expect("secondary").used_percent, 0.0);
+    }
+
+    #[test]
+    fn older_active_cycle_cannot_override_newer_active_cycle() {
+        let now = 1_783_755_232;
+        let newer = limit_with_reset(1.0, 10_080, 1_784_356_548);
+        let older = limit_with_reset(20.0, 10_080, 1_784_252_324);
+
+        let stabilized =
+            stabilize_limit_window(Some(older), Some(newer), now).expect("newer quota cycle");
+
+        assert_eq!(stabilized.used_percent, 1.0);
+        assert_eq!(stabilized.resets_at, Some(1_784_356_548));
     }
 
     #[test]
