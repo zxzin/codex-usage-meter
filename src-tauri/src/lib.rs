@@ -22,7 +22,7 @@ const CODEX_USAGE_ENDPOINT: &str = "https://chatgpt.com/backend-api/wham/usage";
 const ACCOUNT_USAGE_TIMEOUT_SECONDS: u64 = 6;
 const ACCOUNT_USAGE_CACHE_SECONDS: i64 = 8;
 const ACCOUNT_USAGE_ERROR_CACHE_SECONDS: i64 = 3;
-const ACCOUNT_LIMIT_RESET_DRIFT_SECONDS: u64 = 5 * 60;
+const ACCOUNT_LIMIT_SAME_CYCLE_TOLERANCE_SECONDS: u64 = 2 * 60 * 60;
 const ACTIVITY_WAKE_RATE_PER_MIN: f64 = 42_000.0;
 const CODEX_ACCOUNT_CACHE_FILE: &str = "codex-account-cache.json";
 const CLAUDE_STATE_FILE: &str = "claude-status.json";
@@ -1138,7 +1138,8 @@ fn stabilize_limit_window(
                 || current.window_minutes == previous.window_minutes;
             let same_cycle = match (current.resets_at, previous.resets_at) {
                 (Some(current_reset), Some(previous_reset)) => {
-                    current_reset.abs_diff(previous_reset) <= ACCOUNT_LIMIT_RESET_DRIFT_SECONDS
+                    current_reset.abs_diff(previous_reset)
+                        <= ACCOUNT_LIMIT_SAME_CYCLE_TOLERANCE_SECONDS
                 }
                 (None, None) => true,
                 _ => false,
@@ -1758,6 +1759,25 @@ mod tests {
 
         assert_eq!(stabilized.primary.expect("primary").used_percent, 52.0);
         assert_eq!(stabilized.secondary.expect("secondary").used_percent, 16.0);
+    }
+
+    #[test]
+    fn transient_quota_drop_with_hour_scale_reset_drift_keeps_active_cycle() {
+        let now = 1_783_838_861;
+        let current = AccountRateLimits {
+            primary: None,
+            secondary: Some(limit_with_reset(0.0, 10_080, 1_784_359_418)),
+            reset_credits_available: Some(3),
+        };
+        let cached = AccountRateLimits {
+            primary: None,
+            secondary: Some(limit_with_reset(14.0, 10_080, 1_784_356_548)),
+            reset_credits_available: Some(3),
+        };
+
+        let stabilized = stabilize_account_limits(current, Some(cached), now);
+
+        assert_eq!(stabilized.secondary.expect("secondary").used_percent, 14.0);
     }
 
     #[test]
