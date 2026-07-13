@@ -27,8 +27,8 @@ const ACTIVITY_WAKE_RATE_PER_MIN: f64 = 42_000.0;
 const CODEX_ACCOUNT_CACHE_FILE: &str = "codex-account-cache.json";
 const CLAUDE_STATE_FILE: &str = "claude-status.json";
 const CLAUDE_EVENT_MIN_RATE_SECONDS: i64 = 10;
-const CLAUDE_FIVE_HOUR_WINDOW_MINUTES: u64 = 5 * 60;
-const CLAUDE_WEEKLY_WINDOW_MINUTES: u64 = 7 * 24 * 60;
+const FIVE_HOUR_WINDOW_MINUTES: u64 = 5 * 60;
+const WEEKLY_WINDOW_MINUTES: u64 = 7 * 24 * 60;
 
 static SCAN_CACHE: OnceLock<Mutex<ScanCache>> = OnceLock::new();
 static ACCOUNT_USAGE_CACHE: OnceLock<Mutex<AccountUsageCache>> = OnceLock::new();
@@ -831,8 +831,8 @@ fn collect_claude_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::
     let (primary, secondary) = latest_limits
         .map(|(_, limits)| {
             (
-                limit_from_claude_window(limits.five_hour, CLAUDE_FIVE_HOUR_WINDOW_MINUTES),
-                limit_from_claude_window(limits.seven_day, CLAUDE_WEEKLY_WINDOW_MINUTES),
+                limit_from_claude_window(limits.five_hour, FIVE_HOUR_WINDOW_MINUTES),
+                limit_from_claude_window(limits.seven_day, WEEKLY_WINDOW_MINUTES),
             )
         })
         .unwrap_or((None, None));
@@ -1008,9 +1008,9 @@ fn account_limits_for_source(
 
 fn merge_account_and_session_limits(
     account_limits: Result<AccountRateLimits, String>,
-    session_primary: Option<LimitWindow>,
-    session_secondary: Option<LimitWindow>,
-    now: i64,
+    _session_primary: Option<LimitWindow>,
+    _session_secondary: Option<LimitWindow>,
+    _now: i64,
 ) -> (
     Option<LimitWindow>,
     Option<LimitWindow>,
@@ -1018,17 +1018,13 @@ fn merge_account_and_session_limits(
     String,
 ) {
     match account_limits {
-        Ok(limits) => {
-            let primary = stabilize_limit_window(session_primary, limits.primary, now);
-            let secondary = stabilize_limit_window(session_secondary, limits.secondary, now);
-            (
-                primary,
-                secondary,
-                limits.reset_credits_available,
-                "Reading Codex account quota from /wham/usage; token speed from local session events."
-                    .to_string(),
-            )
-        }
+        Ok(limits) => (
+            limits.primary,
+            limits.secondary,
+            limits.reset_credits_available,
+            "Reading Codex account quota from /wham/usage; token speed from local session events."
+                .to_string(),
+        ),
         Err(error) => (
             None,
             None,
@@ -1094,7 +1090,13 @@ fn stabilize_account_limits(
     now: i64,
 ) -> AccountRateLimits {
     if let Some(fallback) = fallback {
-        current.primary = stabilize_limit_window(current.primary, fallback.primary, now);
+        if !current
+            .primary
+            .as_ref()
+            .is_some_and(is_unlimited_five_hour_window)
+        {
+            current.primary = stabilize_limit_window(current.primary, fallback.primary, now);
+        }
         current.secondary = stabilize_limit_window(current.secondary, fallback.secondary, now);
         if current.reset_credits_available.is_none() {
             current.reset_credits_available = fallback.reset_credits_available;
@@ -1241,18 +1243,63 @@ fn fetch_account_rate_limits(
 }
 
 fn account_limits_from_usage(usage: CodexUsageResponse) -> AccountRateLimits {
-    let rate_limit = usage.rate_limit;
+    let (primary, secondary) = usage
+        .rate_limit
+        .map(account_windows_by_duration)
+        .unwrap_or((None, None));
+
     AccountRateLimits {
-        primary: rate_limit
-            .as_ref()
-            .and_then(|rate_limit| limit_from_account_window(rate_limit.primary_window.as_ref())),
-        secondary: rate_limit
-            .as_ref()
-            .and_then(|rate_limit| limit_from_account_window(rate_limit.secondary_window.as_ref())),
+        primary,
+        secondary,
         reset_credits_available: usage
             .rate_limit_reset_credits
             .and_then(|credits| credits.available_count),
     }
+}
+
+fn account_windows_by_duration(
+    rate_limit: CodexRateLimit,
+) -> (Option<LimitWindow>, Option<LimitWindow>) {
+    let mut primary = None;
+    let mut secondary = None;
+
+    for (index, window) in [rate_limit.primary_window, rate_limit.secondary_window]
+        .into_iter()
+        .enumerate()
+    {
+        let Some(window) = limit_from_account_window(window.as_ref()) else {
+            continue;
+        };
+
+        match window.window_minutes {
+            Some(FIVE_HOUR_WINDOW_MINUTES) => primary = Some(window),
+            Some(WEEKLY_WINDOW_MINUTES) => secondary = Some(window),
+            _ if index == 0 => primary = Some(window),
+            _ => secondary = Some(window),
+        }
+    }
+
+    if primary.is_none() && secondary.is_some() {
+        primary = Some(unlimited_five_hour_window());
+    }
+
+    (primary, secondary)
+}
+
+fn unlimited_five_hour_window() -> LimitWindow {
+    LimitWindow {
+        used_percent: 0.0,
+        remaining_percent: 100.0,
+        window_minutes: Some(FIVE_HOUR_WINDOW_MINUTES),
+        resets_at: None,
+    }
+}
+
+fn is_unlimited_five_hour_window(window: &LimitWindow) -> bool {
+    window.window_minutes == Some(FIVE_HOUR_WINDOW_MINUTES)
+        && window.resets_at.is_none()
+        && window.used_percent == 0.0
+        && window.remaining_percent == 100.0
 }
 
 fn limit_from_account_window(window: Option<&CodexLimitWindow>) -> Option<LimitWindow> {
@@ -1707,6 +1754,35 @@ mod tests {
     }
 
     #[test]
+    fn weekly_only_account_window_maps_to_weekly_and_marks_five_hour_unlimited() {
+        let limits = account_limits_from_usage(CodexUsageResponse {
+            rate_limit: Some(CodexRateLimit {
+                primary_window: Some(CodexLimitWindow {
+                    used_percent: Some(1.0),
+                    limit_window_seconds: Some(604_800),
+                    reset_at: Some(1_784_522_993),
+                }),
+                secondary_window: None,
+            }),
+            rate_limit_reset_credits: Some(CodexRateLimitResetCredits {
+                available_count: Some(3),
+            }),
+        });
+
+        let primary = limits
+            .primary
+            .expect("temporarily unlimited five-hour quota");
+        let secondary = limits.secondary.expect("weekly quota");
+
+        assert_eq!(primary.remaining_percent, 100.0);
+        assert_eq!(primary.window_minutes, Some(300));
+        assert_eq!(primary.resets_at, None);
+        assert_eq!(secondary.remaining_percent, 99.0);
+        assert_eq!(secondary.window_minutes, Some(10_080));
+        assert_eq!(secondary.resets_at, Some(1_784_522_993));
+    }
+
+    #[test]
     fn failed_account_usage_does_not_fallback_to_session_quota() {
         let (primary, secondary, reset_credits, message) = merge_account_and_session_limits(
             Err("timeout".to_string()),
@@ -1739,6 +1815,31 @@ mod tests {
         assert_eq!(stabilized.primary.expect("primary").used_percent, 25.0);
         assert_eq!(stabilized.secondary.expect("secondary").used_percent, 50.0);
         assert_eq!(stabilized.reset_credits_available, Some(2));
+    }
+
+    #[test]
+    fn removed_five_hour_limit_replaces_cached_five_hour_quota() {
+        let now = 1_784_000_000;
+        let current = AccountRateLimits {
+            primary: Some(unlimited_five_hour_window()),
+            secondary: Some(limit_with_reset(1.0, 10_080, 1_784_522_993)),
+            reset_credits_available: Some(3),
+        };
+        let cached = AccountRateLimits {
+            primary: Some(limit_with_reset(42.0, 300, 1_784_010_000)),
+            secondary: Some(limit_with_reset(38.0, 10_080, 1_784_356_548)),
+            reset_credits_available: Some(3),
+        };
+
+        let stabilized = stabilize_account_limits(current, Some(cached), now);
+        let primary = stabilized.primary.expect("unlimited five-hour quota");
+
+        assert_eq!(primary.remaining_percent, 100.0);
+        assert_eq!(primary.resets_at, None);
+        assert_eq!(
+            stabilized.secondary.expect("weekly quota").used_percent,
+            1.0
+        );
     }
 
     #[test]
@@ -1845,7 +1946,7 @@ mod tests {
     }
 
     #[test]
-    fn account_usage_combines_higher_session_window_when_successful() {
+    fn successful_account_usage_does_not_restore_removed_session_windows() {
         let account_limits = AccountRateLimits {
             primary: Some(limit(20.0)),
             secondary: None,
@@ -1858,13 +1959,13 @@ mod tests {
             0,
         );
 
-        assert_eq!(primary.expect("primary").used_percent, 30.0);
-        assert_eq!(secondary.expect("secondary").used_percent, 40.0);
+        assert_eq!(primary.expect("primary").used_percent, 20.0);
+        assert!(secondary.is_none());
         assert_eq!(reset_credits, Some(1));
     }
 
     #[test]
-    fn higher_session_usage_repairs_transient_account_snapshot() {
+    fn session_usage_cannot_override_authoritative_account_snapshot() {
         let now = 1_783_673_398;
         let account_limits = AccountRateLimits {
             primary: Some(limit_with_reset(1.0, 300, 1_783_683_659)),
@@ -1879,8 +1980,8 @@ mod tests {
             now,
         );
 
-        assert_eq!(primary.expect("primary").used_percent, 52.0);
-        assert_eq!(secondary.expect("secondary").used_percent, 16.0);
+        assert_eq!(primary.expect("primary").used_percent, 1.0);
+        assert_eq!(secondary.expect("secondary").used_percent, 0.0);
     }
 
     #[test]
