@@ -23,10 +23,10 @@ jobs:
         include:
           - name: macOS
             runner: macos-latest
-            args: --bundles app,dmg
+            args: --features direct-download --bundles app,dmg
           - name: Windows
             runner: windows-latest
-            args: --bundles nsis,msi
+            args: --features direct-download --bundles nsis,msi
     runs-on: ${{ matrix.runner }}
 
     steps:

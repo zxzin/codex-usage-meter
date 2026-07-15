@@ -1,6 +1,6 @@
 {
   "name": "token-meter",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "type": "module",
   "bin": {
@@ -15,10 +15,11 @@
     "claude:install": "node scripts/install-claude.mjs",
     "preview": "vite preview --host 127.0.0.1 --port 1420",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build",
-    "tauri:build:mac": "tauri build --bundles app,dmg",
-    "tauri:build:windows": "tauri build --bundles nsis,msi"
+    "tauri:dev": "tauri dev --features direct-download",
+    "tauri:build": "tauri build --features direct-download",
+    "tauri:build:mac": "tauri build --features direct-download --bundles app,dmg",
+    "tauri:build:windows": "tauri build --features direct-download --bundles nsis,msi",
+    "tauri:build:appstore": "node scripts/build-app-store.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",

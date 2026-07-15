@@ -79,10 +79,10 @@ function openBuiltApp() {
 
 function buildDebugApp() {
   if (process.platform === "darwin") {
-    return run(npmCommand, ["run", "tauri", "--", "build", "--debug", "--bundles", "app"]);
+    return run(npmCommand, ["run", "tauri", "--", "build", "--debug", "--features", "direct-download", "--bundles", "app"]);
   }
   if (process.platform === "win32") {
-    return run(npmCommand, ["run", "tauri", "--", "build", "--debug", "--bundles", "nsis"]);
+    return run(npmCommand, ["run", "tauri", "--", "build", "--debug", "--features", "direct-download", "--bundles", "nsis"]);
   }
 
   console.error("No debug bundle build command is configured for this platform.");

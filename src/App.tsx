@@ -78,7 +78,21 @@ export function App() {
       }
     }
 
-    poll();
+    async function start() {
+      try {
+        await invoke<boolean>("ensure_codex_access");
+      } catch (err) {
+        if (alive) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      }
+
+      if (alive) {
+        await poll();
+      }
+    }
+
+    void start();
     return () => {
       alive = false;
       window.clearTimeout(pollTimer);
@@ -133,6 +147,7 @@ export function App() {
 
   useEffect(() => {
     let unlistenReload: (() => void) | undefined;
+    let unlistenConnect: (() => void) | undefined;
     let alive = true;
 
     const handleNativeReload = () => {
@@ -155,10 +170,29 @@ export function App() {
         console.warn("Native reload menu events unavailable:", err);
       });
 
+    void listen("context-menu-connect", () => {
+      void invoke<boolean>("choose_codex_folder")
+        .then(() => reloadSnapshot())
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : String(err));
+        });
+    })
+      .then((unlisten) => {
+        if (alive) {
+          unlistenConnect = unlisten;
+        } else {
+          unlisten();
+        }
+      })
+      .catch((err) => {
+        console.warn("Codex folder menu events unavailable:", err);
+      });
+
     return () => {
       alive = false;
       window.removeEventListener("token-meter-reload", handleNativeReload);
       unlistenReload?.();
+      unlistenConnect?.();
     };
   }, [reloadSnapshot]);
 

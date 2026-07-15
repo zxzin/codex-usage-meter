@@ -14,6 +14,14 @@ use tauri::utils::config::Color;
 use tauri::{Emitter, EventTarget, LogicalPosition, Manager, PhysicalPosition};
 use walkdir::WalkDir;
 
+#[cfg(all(target_os = "macos", feature = "app-store"))]
+use std::sync::mpsc;
+
+#[cfg(all(target_os = "macos", feature = "app-store"))]
+mod macos_native_renderer;
+#[cfg(all(target_os = "macos", feature = "app-store"))]
+mod macos_store;
+
 const SPEED_WINDOW_SECONDS: i64 = 60;
 const ACTIVE_GRACE_SECONDS: i64 = 90;
 const RECENT_FILE_SECONDS: u64 = 2 * 24 * 60 * 60;
@@ -33,6 +41,7 @@ const WEEKLY_WINDOW_MINUTES: u64 = 7 * 24 * 60;
 static SCAN_CACHE: OnceLock<Mutex<ScanCache>> = OnceLock::new();
 static ACCOUNT_USAGE_CACHE: OnceLock<Mutex<AccountUsageCache>> = OnceLock::new();
 static CONTEXT_MENU_CACHE: OnceLock<Mutex<Option<tauri::menu::Menu<tauri::Wry>>>> = OnceLock::new();
+static APP_DATA_HOME: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -135,6 +144,7 @@ struct CachedAccountRateLimitsFile {
     limits: AccountRateLimits,
 }
 
+#[cfg_attr(all(target_os = "macos", feature = "app-store"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProviderMode {
     Auto,
@@ -256,6 +266,52 @@ async fn get_usage_snapshot() -> Result<UsageSnapshot, String> {
 }
 
 #[tauri::command]
+async fn ensure_codex_access(app: tauri::AppHandle) -> Result<bool, String> {
+    request_codex_folder_access(app, false).await
+}
+
+#[tauri::command]
+async fn choose_codex_folder(app: tauri::AppHandle) -> Result<bool, String> {
+    request_codex_folder_access(app, true).await
+}
+
+async fn request_codex_folder_access(
+    app: tauri::AppHandle,
+    force_picker: bool,
+) -> Result<bool, String> {
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
+    {
+        let bookmark_path = app_store_bookmark_path()?;
+        if !force_picker && macos_store::activate_saved_codex_home(&bookmark_path).is_ok() {
+            return Ok(true);
+        }
+
+        let suggested_directory = picker_home_dir();
+        let (sender, receiver) = mpsc::channel();
+        app.run_on_main_thread(move || {
+            let result = macos_store::choose_codex_home(&bookmark_path, &suggested_directory);
+            let _ = sender.send(result);
+        })
+        .map_err(|error| error.to_string())?;
+
+        return tauri::async_runtime::spawn_blocking(move || {
+            receiver
+                .recv()
+                .map_err(|_| "Codex folder picker closed unexpectedly.".to_string())?
+                .map(|_| true)
+        })
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "app-store")))]
+    {
+        let _ = (app, force_picker);
+        Ok(true)
+    }
+}
+
+#[tauri::command]
 fn start_window_drag(window: tauri::Window) -> Result<(), String> {
     window.start_dragging().map_err(|error| error.to_string())
 }
@@ -272,6 +328,17 @@ fn show_context_menu(window: tauri::Window, x: f64, y: f64) -> Result<(), String
     let reload = MenuItemBuilder::with_id("context-reload", "Reload")
         .build(app)
         .map_err(|error| error.to_string())?;
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
+    let menu = {
+        let connect = MenuItemBuilder::with_id("context-connect", "Connect Codex Folder…")
+            .build(app)
+            .map_err(|error| error.to_string())?;
+        MenuBuilder::new(app)
+            .items(&[&reload, &connect])
+            .build()
+            .map_err(|error| error.to_string())?
+    };
+    #[cfg(not(all(target_os = "macos", feature = "app-store")))]
     let menu = MenuBuilder::new(app)
         .item(&reload)
         .build()
@@ -294,11 +361,14 @@ pub fn run() {
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_usage_snapshot,
+            ensure_codex_access,
+            choose_codex_folder,
             start_window_drag,
             refresh_window_chrome,
             show_context_menu
         ])
         .setup(|app| {
+            configure_app_data_home(app);
             configure_app_activation(app);
             configure_main_window(app);
             app.on_menu_event(|app, event| {
@@ -315,6 +385,29 @@ pub fn run() {
             restore_main_window(app);
         }
     });
+}
+
+fn configure_app_data_home(app: &tauri::App) {
+    if let Ok(path) = app.path().app_data_dir() {
+        let _ = fs::create_dir_all(&path);
+        let _ = APP_DATA_HOME.set(path);
+    }
+}
+
+#[cfg(all(target_os = "macos", feature = "app-store"))]
+fn app_store_bookmark_path() -> Result<PathBuf, String> {
+    APP_DATA_HOME
+        .get()
+        .map(|path| path.join("codex-folder.bookmark"))
+        .ok_or_else(|| "Token Meter application data folder is unavailable.".to_string())
+}
+
+#[cfg(all(target_os = "macos", feature = "app-store"))]
+fn picker_home_dir() -> PathBuf {
+    env::var_os("USER")
+        .filter(|value| !value.is_empty())
+        .map(|user| PathBuf::from("/Users").join(user))
+        .unwrap_or_else(home_dir)
 }
 
 fn configure_app_activation(app: &mut tauri::App) {
@@ -336,6 +429,16 @@ fn clear_context_menu_cache() {
 }
 
 fn handle_context_menu_event(app: &tauri::AppHandle, id: &str) {
+    if id == "context-connect" {
+        let _ = app.emit_to(
+            EventTarget::webview_window("main"),
+            "context-menu-connect",
+            (),
+        );
+        clear_context_menu_cache();
+        return;
+    }
+
     if id == "context-reload" {
         let _ = app.emit_to(
             EventTarget::webview_window("main"),
@@ -382,9 +485,11 @@ fn apply_transparent_window_chrome(window: &tauri::WebviewWindow) {
 #[cfg(target_os = "macos")]
 fn apply_macos_native_transparency(window: &tauri::WebviewWindow) {
     let _ = window.with_webview(|platform_webview| {
-        use objc2::{msg_send, runtime::AnyObject, sel};
         use objc2_app_kit::{NSColor, NSView, NSWindow};
         use objc2_web_kit::WKWebView;
+
+        #[cfg(feature = "direct-download")]
+        use objc2::{msg_send, runtime::AnyObject, sel};
 
         unsafe {
             let clear = NSColor::clearColor();
@@ -409,20 +514,26 @@ fn apply_macos_native_transparency(window: &tauri::WebviewWindow) {
             ns_view.setWantsLayer(true);
             ns_view.setNeedsDisplay(true);
 
-            let object = &*(webview_ptr.cast::<AnyObject>());
-            let responds_to_set_opaque: bool =
-                msg_send![object, respondsToSelector: sel!(setOpaque:)];
-            if responds_to_set_opaque {
-                let _: () = msg_send![object, setOpaque: false];
-            }
+            #[cfg(feature = "direct-download")]
+            {
+                let object = &*(webview_ptr.cast::<AnyObject>());
+                let responds_to_set_opaque: bool =
+                    msg_send![object, respondsToSelector: sel!(setOpaque:)];
+                if responds_to_set_opaque {
+                    let _: () = msg_send![object, setOpaque: false];
+                }
 
-            let responds_to_set_draws_background: bool =
-                msg_send![object, respondsToSelector: sel!(setDrawsBackground:)];
-            if responds_to_set_draws_background {
-                let _: () = msg_send![object, setDrawsBackground: false];
+                let responds_to_set_draws_background: bool =
+                    msg_send![object, respondsToSelector: sel!(setDrawsBackground:)];
+                if responds_to_set_draws_background {
+                    let _: () = msg_send![object, setDrawsBackground: false];
+                }
             }
         }
     });
+
+    #[cfg(feature = "app-store")]
+    macos_native_renderer::install(window);
 }
 
 fn position_main_window(window: &tauri::WebviewWindow) {
@@ -500,23 +611,35 @@ fn provider_score(snapshot: &UsageSnapshot) -> (u8, i64, usize) {
 }
 
 fn provider_mode_from_env() -> ProviderMode {
-    [
-        "USAGE_METER_PROVIDER",
-        "CODEX_USAGE_PROVIDER",
-        "TOKEN_USAGE_PROVIDER",
-    ]
-    .iter()
-    .find_map(|key| env::var(key).ok())
-    .map(|value| match value.trim().to_ascii_lowercase().as_str() {
-        "codex" => ProviderMode::Codex,
-        "claude" | "claude-code" | "claude_code" => ProviderMode::Claude,
-        _ => ProviderMode::Auto,
-    })
-    .unwrap_or(ProviderMode::Auto)
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
+    {
+        ProviderMode::Codex
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "app-store")))]
+    {
+        [
+            "USAGE_METER_PROVIDER",
+            "CODEX_USAGE_PROVIDER",
+            "TOKEN_USAGE_PROVIDER",
+        ]
+        .iter()
+        .find_map(|key| env::var(key).ok())
+        .map(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "codex" => ProviderMode::Codex,
+            "claude" | "claude-code" | "claude_code" => ProviderMode::Claude,
+            _ => ProviderMode::Auto,
+        })
+        .unwrap_or(ProviderMode::Auto)
+    }
 }
 
 fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::Error>> {
     let now = Utc::now().timestamp();
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
+    let codex_home = macos_store::active_codex_home()
+        .ok_or("Select the .codex folder to connect Token Meter to Codex.")?;
+    #[cfg(not(all(target_os = "macos", feature = "app-store")))]
     let codex_home = codex_home();
     let sessions_dir = codex_home.join("sessions");
     let account_limits = account_rate_limits_cached(&codex_home, now);
@@ -917,6 +1040,11 @@ fn claude_source_status(
 }
 
 fn usage_meter_home() -> PathBuf {
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
+    if let Some(path) = APP_DATA_HOME.get() {
+        return path.clone();
+    }
+
     env::var("TOKEN_METER_HOME")
         .or_else(|_| env::var("CODEX_USAGE_METER_HOME"))
         .or_else(|_| env::var("USAGE_METER_HOME"))
@@ -1313,6 +1441,7 @@ fn limit_from_account_window(window: Option<&CodexLimitWindow>) -> Option<LimitW
     })
 }
 
+#[cfg(not(all(target_os = "macos", feature = "app-store")))]
 fn codex_home() -> PathBuf {
     env::var("CODEX_HOME")
         .map(PathBuf::from)

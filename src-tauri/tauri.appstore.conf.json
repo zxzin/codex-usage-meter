@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["app"],
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "entitlements": "./Entitlements.appstore.plist",
+      "signingIdentity": "-"
+    }
+  },
+  "app": {
+    "macOSPrivateApi": false,
+    "windows": [
+      {
+        "label": "main",
+        "title": "Token Meter",
+        "width": 88,
+        "height": 88,
+        "minWidth": 76,
+        "minHeight": 76,
+        "resizable": true,
+        "decorations": false,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": false,
+        "visible": true
+      }
+    ]
+  }
+}
