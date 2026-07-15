@@ -258,11 +258,16 @@ struct CachedSession {
 
 #[tauri::command]
 async fn get_usage_snapshot() -> Result<UsageSnapshot, String> {
-    tauri::async_runtime::spawn_blocking(|| {
+    let snapshot = tauri::async_runtime::spawn_blocking(|| {
         collect_usage_snapshot().map_err(|error| error.to_string())
     })
     .await
-    .map_err(|error| format!("Usage snapshot task failed: {error}"))?
+    .map_err(|error| format!("Usage snapshot task failed: {error}"))??;
+
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
+    macos_native_renderer::set_animation_burn_rate(snapshot.animation_burn_rate_per_min);
+
+    Ok(snapshot)
 }
 
 #[tauri::command]

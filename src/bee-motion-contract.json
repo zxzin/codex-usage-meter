@@ -1,0 +1,33 @@
+{
+  "speedFullRatePerMin": 3000000,
+  "speedLogBaseRatePerMin": 24000,
+  "orbitIdleRatio": 0.18,
+  "orbitSlowSeconds": 3.2,
+  "orbitFastSeconds": 0.72,
+  "trailStartRatio": 0.7,
+  "trailNearMaxOpacity": 0.22,
+  "trailFarMaxOpacity": 0.1,
+  "wingSlowMs": 118,
+  "wingFastMs": 68,
+  "orbitBaseRadiusPx": 21,
+  "orbitFastRadiusPx": 38,
+  "orbitRadiusCurve": 1.35,
+  "orbitSmoothingPerSecond": 7,
+  "maxFrameSeconds": 0.05,
+  "motionAccelerationPerSecond": 7,
+  "motionDecelerationPerSecond": 1.7,
+  "motionIdleDecayPerSecond": 0.14,
+  "motionStopRatio": 0.012,
+  "motionRenderEpsilon": 0.0015,
+  "beeWidthPx": 18,
+  "beeAspectWidth": 160,
+  "beeAspectHeight": 144,
+  "beeFacingRotationDeg": 96,
+  "beeActiveScale": 0.96,
+  "beeCount": 3,
+  "staticPlacements": [
+    { "xPx": -12, "yPx": 19, "rotationDeg": 173, "scale": 0.9, "flipX": false },
+    { "xPx": 3, "yPx": -19, "rotationDeg": 5, "scale": 0.82, "flipX": false },
+    { "xPx": 12, "yPx": 19, "rotationDeg": 187, "scale": 0.88, "flipX": true }
+  ]
+}

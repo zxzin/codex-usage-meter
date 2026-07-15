@@ -41,6 +41,13 @@ Use `npm run build` for a fast frontend-only check on any platform.
 
 The Mac App Store build uses the same React meter, quota logic, bee assets, and motion model as the GitHub release. Its macOS wrapper adds App Sandbox folder access and a public-API transparent renderer; the GitHub-only private WebKit feature must remain scoped to the `direct-download` Cargo feature.
 
+Parity is enforced in code rather than by manually matching two independent animations:
+
+- `src/bee-motion-contract.json` is the shared source of truth for speed mapping, acceleration/deceleration, orbit radius, facing angle, wing speed, trail opacity, and idle placements.
+- The React/SVG layer renders the hive and both live quota rows in every build.
+- The App Store renderer snapshots only that low-frequency static/data layer. It composites the original `bee-body-wingless-ui.png` and `bee-wing-ui.png` assets in native layers so flight, wing motion, and the two softened trail layers remain continuous when WebKit refreshes quota data.
+- A 30-second 60 fps capture must have no multi-frame freeze. Compare its adjacent duplicate count and longest duplicate run with the current GitHub build before accepting a renderer change.
+
 Build and launch the local sandbox candidate:
 
 ```sh

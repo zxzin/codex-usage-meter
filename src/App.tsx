@@ -12,34 +12,34 @@ import {
 import type { UsageSnapshot } from "./types";
 import beeBodyAsset from "./assets/living/bee-body-wingless-ui.png";
 import beeWingAsset from "./assets/living/bee-wing-ui.png";
+import beeMotionContract from "./bee-motion-contract.json";
 
-const BEE_SPEED_FULL_RATE_PER_MIN = 3_000_000;
-const BEE_SPEED_LOG_BASE_RATE_PER_MIN = 24_000;
-const BEE_ORBIT_IDLE_RATIO = 0.18;
-const BEE_ORBIT_SLOW_SECONDS = 3.2;
-const BEE_ORBIT_FAST_SECONDS = 0.72;
-const BEE_TRAIL_START_RATIO = 0.7;
-const BEE_TRAIL_NEAR_MAX_OPACITY = 0.22;
-const BEE_TRAIL_FAR_MAX_OPACITY = 0.1;
-const BEE_WING_SLOW_MS = 118;
-const BEE_WING_FAST_MS = 68;
-const BEE_ORBIT_BASE_RADIUS_PX = 21;
-const BEE_ORBIT_FAST_RADIUS_PX = 38;
-const BEE_ORBIT_RADIUS_CURVE = 1.35;
-const BEE_ORBIT_SMOOTHING_PER_SECOND = 7;
-const BEE_ORBIT_MAX_FRAME_SECONDS = 0.05;
-const BEE_MOTION_ACCELERATION_PER_SECOND = 7;
-const BEE_MOTION_DECELERATION_PER_SECOND = 1.7;
-const BEE_MOTION_IDLE_DECAY_PER_SECOND = 0.14;
-const BEE_MOTION_STOP_RATIO = 0.012;
-const BEE_MOTION_RENDER_EPSILON = 0.0015;
+const BEE_SPEED_FULL_RATE_PER_MIN = beeMotionContract.speedFullRatePerMin;
+const BEE_SPEED_LOG_BASE_RATE_PER_MIN = beeMotionContract.speedLogBaseRatePerMin;
+const BEE_ORBIT_IDLE_RATIO = beeMotionContract.orbitIdleRatio;
+const BEE_ORBIT_SLOW_SECONDS = beeMotionContract.orbitSlowSeconds;
+const BEE_ORBIT_FAST_SECONDS = beeMotionContract.orbitFastSeconds;
+const BEE_TRAIL_START_RATIO = beeMotionContract.trailStartRatio;
+const BEE_TRAIL_NEAR_MAX_OPACITY = beeMotionContract.trailNearMaxOpacity;
+const BEE_TRAIL_FAR_MAX_OPACITY = beeMotionContract.trailFarMaxOpacity;
+const BEE_WING_SLOW_MS = beeMotionContract.wingSlowMs;
+const BEE_WING_FAST_MS = beeMotionContract.wingFastMs;
+const BEE_ORBIT_BASE_RADIUS_PX = beeMotionContract.orbitBaseRadiusPx;
+const BEE_ORBIT_FAST_RADIUS_PX = beeMotionContract.orbitFastRadiusPx;
+const BEE_ORBIT_RADIUS_CURVE = beeMotionContract.orbitRadiusCurve;
+const BEE_ORBIT_SMOOTHING_PER_SECOND = beeMotionContract.orbitSmoothingPerSecond;
+const BEE_ORBIT_MAX_FRAME_SECONDS = beeMotionContract.maxFrameSeconds;
+const BEE_MOTION_ACCELERATION_PER_SECOND = beeMotionContract.motionAccelerationPerSecond;
+const BEE_MOTION_DECELERATION_PER_SECOND = beeMotionContract.motionDecelerationPerSecond;
+const BEE_MOTION_IDLE_DECAY_PER_SECOND = beeMotionContract.motionIdleDecayPerSecond;
+const BEE_MOTION_STOP_RATIO = beeMotionContract.motionStopRatio;
+const BEE_MOTION_RENDER_EPSILON = beeMotionContract.motionRenderEpsilon;
+const BEE_FACING_ROTATION_DEG = beeMotionContract.beeFacingRotationDeg;
+const BEE_ACTIVE_SCALE = beeMotionContract.beeActiveScale;
+const BEE_COUNT = beeMotionContract.beeCount;
 const USAGE_POLL_INTERVAL_MS = 2000;
 // Static bees perch inside the minimum active orbit radius, with feet against the frame.
-const BEE_STATIC_PLACEMENTS = [
-  { xPx: -12, yPx: 19, rotationDeg: 173, scale: 0.9, flipX: false },
-  { xPx: 3, yPx: -19, rotationDeg: 5, scale: 0.82, flipX: false },
-  { xPx: 12, yPx: 19, rotationDeg: 187, scale: 0.88, flipX: true },
-] as const;
+const BEE_STATIC_PLACEMENTS = beeMotionContract.staticPlacements;
 
 export function App() {
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null);
@@ -302,7 +302,7 @@ function HiveMeter({ snapshot }: { snapshot: UsageSnapshot }) {
     currentRadius: orbitRadius,
     lastTime: 0,
   });
-  const beeCount = 3;
+  const beeCount = BEE_COUNT;
   const quotaLabel = `5H ${formatPercent(snapshot.primary?.remainingPercent)}; Weekly ${formatPercent(snapshot.secondary?.remainingPercent)}`;
 
   useEffect(() => {
@@ -800,7 +800,7 @@ function beeOrbitRadiusPx(motionRatio: number) {
 }
 
 function beeOrbitTransform(angleDeg: number, radiusPx: number) {
-  return `translate(-50%, -50%) rotate(${angleDeg.toFixed(3)}deg) translateX(${radiusPx.toFixed(2)}px) rotate(96deg) scale(0.96)`;
+  return `translate(-50%, -50%) rotate(${angleDeg.toFixed(3)}deg) translateX(${radiusPx.toFixed(2)}px) rotate(${BEE_FACING_ROTATION_DEG}deg) scale(${BEE_ACTIVE_SCALE})`;
 }
 
 function beeStaticPlacement(index: number) {
