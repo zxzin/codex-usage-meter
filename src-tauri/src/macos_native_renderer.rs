@@ -332,6 +332,7 @@ static ROOT_LAYER: OnceLock<usize> = OnceLock::new();
 static SNAPSHOT_LAYER: OnceLock<usize> = OnceLock::new();
 static BEE_LAYERS: OnceLock<Vec<BeeLayers>> = OnceLock::new();
 static WEBVIEW_POINTER: OnceLock<usize> = OnceLock::new();
+static RENDER_VIEW_POINTER: OnceLock<usize> = OnceLock::new();
 static SNAPSHOT_LOOP_STARTED: OnceLock<()> = OnceLock::new();
 static ANIMATION_LOOP_STARTED: OnceLock<()> = OnceLock::new();
 static ANIMATION_APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
@@ -351,6 +352,12 @@ pub fn install(window: &tauri::WebviewWindow) {
         }
 
         let webview = &*(webview_ptr.cast::<NSView>());
+        if let Some(window) = webview.window() {
+            let clear = NSColor::clearColor();
+            window.setOpaque(false);
+            window.setBackgroundColor(Some(&clear));
+            window.setHasShadow(false);
+        }
         webview.setAlphaValue(0.0);
         let wk_webview = &*(webview_ptr.cast::<WKWebView>());
         wk_webview.setUnderPageBackgroundColor(Some(&NSColor::blackColor()));
@@ -384,6 +391,7 @@ pub fn install(window: &tauri::WebviewWindow) {
 
         let _ = ROOT_LAYER.set(Retained::as_ptr(&root_layer) as usize);
         let _ = SNAPSHOT_LAYER.set(Retained::as_ptr(&snapshot_layer) as usize);
+        let _ = RENDER_VIEW_POINTER.set(Retained::as_ptr(&render_view) as usize);
         create_bee_layers(&root_layer);
 
         parent.addSubview(&render_view);
@@ -393,6 +401,21 @@ pub fn install(window: &tauri::WebviewWindow) {
     update_bee_layers();
     start_snapshot_loop(window.app_handle().clone());
     start_animation_loop(window.app_handle().clone());
+}
+
+pub fn set_enabled(window: &tauri::WebviewWindow, enabled: bool) {
+    let _ = window.with_webview(move |platform_webview| unsafe {
+        let webview_ptr = platform_webview.inner();
+        if !webview_ptr.is_null() {
+            let webview = &*(webview_ptr.cast::<NSView>());
+            webview.setAlphaValue(if enabled { 0.0 } else { 1.0 });
+        }
+
+        if let Some(pointer) = RENDER_VIEW_POINTER.get() {
+            let render_view = &*(*pointer as *const NSView);
+            render_view.setHidden(!enabled);
+        }
+    });
 }
 
 pub fn set_animation_burn_rate(rate_per_min: f64) {
@@ -1380,5 +1403,16 @@ mod tests {
         assert!((far_display_blur - 0.8).abs() < 0.04);
         assert!(styles.contains("blur(0.42px)"));
         assert!(styles.contains("blur(0.8px)"));
+    }
+
+    #[test]
+    fn app_store_renderer_uses_public_window_transparency() {
+        let implementation = include_str!("macos_native_renderer.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .expect("renderer implementation must precede tests");
+        assert!(implementation.contains("window.setOpaque(false)"));
+        assert!(implementation.contains("NSColor::clearColor()"));
+        assert!(!implementation.contains("setDrawsBackground"));
     }
 }

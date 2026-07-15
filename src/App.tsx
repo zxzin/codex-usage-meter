@@ -10,8 +10,19 @@ import {
   formatTokens,
 } from "./format";
 import type { UsageSnapshot } from "./types";
+import {
+  loadSubscriptionGate,
+  openSubscriptionLink,
+  purchaseSubscription,
+  restoreSubscription,
+  setSubscriptionWindowMode,
+  subscriptionErrorMessage,
+  subscriptionPrice,
+  type SubscriptionGate,
+} from "./subscription";
 import beeBodyAsset from "./assets/living/bee-body-wingless-ui.png";
 import beeWingAsset from "./assets/living/bee-wing-ui.png";
+import appIconAsset from "../src-tauri/icons/128x128.png";
 import beeMotionContract from "./bee-motion-contract.json";
 
 const BEE_SPEED_FULL_RATE_PER_MIN = beeMotionContract.speedFullRatePerMin;
@@ -44,7 +55,82 @@ const BEE_STATIC_PLACEMENTS = beeMotionContract.staticPlacements;
 export function App() {
   const [snapshot, setSnapshot] = useState<UsageSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [subscriptionGate, setSubscriptionGate] = useState<SubscriptionGate>({ status: "checking" });
+  const [subscriptionBusy, setSubscriptionBusy] = useState(false);
+  const [subscriptionMessage, setSubscriptionMessage] = useState("");
+  const subscriptionGateRef = useRef(subscriptionGate);
   const lastMenuOpenAtRef = useRef(0);
+  const accessGranted = subscriptionGate.status === "active" || subscriptionGate.status === "not_required";
+
+  useEffect(() => {
+    subscriptionGateRef.current = subscriptionGate;
+  }, [subscriptionGate]);
+
+  const applySubscriptionGate = useCallback(async (next: SubscriptionGate) => {
+    await setSubscriptionWindowMode(next.status !== "active" && next.status !== "not_required");
+    setSubscriptionGate(next);
+    setSubscriptionMessage("");
+  }, []);
+
+  const refreshSubscription = useCallback(async (preserveActiveOnError = false) => {
+    try {
+      const next = await loadSubscriptionGate();
+      await applySubscriptionGate(next);
+    } catch (err) {
+      if (preserveActiveOnError && subscriptionGateRef.current.status === "active") {
+        return;
+      }
+      await setSubscriptionWindowMode(true).catch(() => undefined);
+      setSubscriptionGate({
+        status: "unavailable",
+        message: "The App Store could not verify the subscription. Please try again.",
+      });
+      setSubscriptionMessage(subscriptionErrorMessage(err));
+    }
+  }, [applySubscriptionGate]);
+
+  useEffect(() => {
+    void refreshSubscription();
+  }, [refreshSubscription]);
+
+  useEffect(() => {
+    if (subscriptionGate.status !== "active") {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshSubscription(true);
+    }, 15 * 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, [refreshSubscription, subscriptionGate.status]);
+
+  const subscribe = useCallback(async () => {
+    setSubscriptionBusy(true);
+    setSubscriptionMessage("");
+    try {
+      const next = await purchaseSubscription();
+      await applySubscriptionGate(next);
+    } catch (err) {
+      setSubscriptionMessage(subscriptionErrorMessage(err));
+    } finally {
+      setSubscriptionBusy(false);
+    }
+  }, [applySubscriptionGate]);
+
+  const restore = useCallback(async () => {
+    setSubscriptionBusy(true);
+    setSubscriptionMessage("");
+    try {
+      const next = await restoreSubscription();
+      await applySubscriptionGate(next);
+      if (next.status === "inactive") {
+        setSubscriptionMessage("No active subscription was found for this Apple Account.");
+      }
+    } catch (err) {
+      setSubscriptionMessage(subscriptionErrorMessage(err));
+    } finally {
+      setSubscriptionBusy(false);
+    }
+  }, [applySubscriptionGate]);
 
   const reloadSnapshot = useCallback(async () => {
     try {
@@ -57,6 +143,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!accessGranted) {
+      return;
+    }
+
     let alive = true;
     let pollTimer = 0;
 
@@ -97,7 +187,7 @@ export function App() {
       alive = false;
       window.clearTimeout(pollTimer);
     };
-  }, []);
+  }, [accessGranted]);
 
   const labels = enLabels;
   const heat = snapshot?.state ?? "waiting";
@@ -146,6 +236,10 @@ export function App() {
   );
 
   useEffect(() => {
+    if (!accessGranted) {
+      return;
+    }
+
     let unlistenReload: (() => void) | undefined;
     let unlistenConnect: (() => void) | undefined;
     let alive = true;
@@ -194,9 +288,13 @@ export function App() {
       unlistenReload?.();
       unlistenConnect?.();
     };
-  }, [reloadSnapshot]);
+  }, [accessGranted, reloadSnapshot]);
 
   useEffect(() => {
+    if (!accessGranted) {
+      return;
+    }
+
     const handleContextMenu = (event: globalThis.MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
@@ -222,7 +320,7 @@ export function App() {
       document.removeEventListener("mousedown", handleMouseDown, true);
       window.removeEventListener("mousedown", handleMouseDown, true);
     };
-  }, [openNativeContextMenu]);
+  }, [accessGranted, openNativeContextMenu]);
 
   const startWindowDrag = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (event.button !== 0) {
@@ -235,6 +333,20 @@ export function App() {
       });
     });
   }, []);
+
+  if (!accessGranted) {
+    return (
+      <SubscriptionPaywall
+        gate={subscriptionGate}
+        busy={subscriptionBusy}
+        message={subscriptionMessage}
+        onSubscribe={subscribe}
+        onRestore={restore}
+        onRetry={() => void refreshSubscription()}
+        onMouseDown={startWindowDrag}
+      />
+    );
+  }
 
   return (
     <main
@@ -264,6 +376,111 @@ export function App() {
           <p>{error ?? labels.loading}</p>
         )}
       </aside>
+    </main>
+  );
+}
+
+function SubscriptionPaywall({
+  gate,
+  busy,
+  message,
+  onSubscribe,
+  onRestore,
+  onRetry,
+  onMouseDown,
+}: {
+  gate: SubscriptionGate;
+  busy: boolean;
+  message: string;
+  onSubscribe: () => void;
+  onRestore: () => void;
+  onRetry: () => void;
+  onMouseDown: (event: React.MouseEvent<HTMLElement>) => void;
+}) {
+  const stopDrag = (event: React.MouseEvent<HTMLElement>) => event.stopPropagation();
+  const product = gate.status === "inactive" ? gate.product : null;
+
+  return (
+    <main className="subscription-shell" data-tauri-drag-region="deep" onMouseDown={onMouseDown}>
+      <section className="subscription-panel">
+        <img className="subscription-icon" src={appIconAsset} alt="" />
+        <div className="subscription-heading">
+          <h1>Token Meter</h1>
+          <p>Keep Codex usage visible while you work.</p>
+        </div>
+
+        {gate.status === "checking" ? (
+          <div className="subscription-status" role="status">
+            <span className="subscription-spinner" aria-hidden="true" />
+            <span>Checking App Store subscription…</span>
+          </div>
+        ) : product ? (
+          <>
+            <div className="subscription-offer">
+              <strong>7 days free</strong>
+              <span>Then {subscriptionPrice(product)} per month</span>
+            </div>
+            <ul className="subscription-benefits">
+              <li>Live 5-hour and weekly usage</li>
+              <li>Motion that follows token burn rate</li>
+              <li>Local processing, with no account to create</li>
+            </ul>
+            <button
+              className="subscription-primary"
+              type="button"
+              disabled={busy}
+              onMouseDown={stopDrag}
+              onClick={onSubscribe}
+            >
+              {busy ? "Connecting to App Store…" : "Start 7-Day Free Trial"}
+            </button>
+          </>
+        ) : (
+          <div className="subscription-unavailable" role="alert">
+            <strong>Subscription unavailable</strong>
+            <span>{gate.status === "unavailable" ? gate.message : "Please try again."}</span>
+            <button type="button" disabled={busy} onMouseDown={stopDrag} onClick={onRetry}>
+              Try Again
+            </button>
+          </div>
+        )}
+
+        {message ? <p className="subscription-message">{message}</p> : null}
+
+        <div className="subscription-footer">
+          <button type="button" disabled={busy} onMouseDown={stopDrag} onClick={onRestore}>
+            Restore Purchases
+          </button>
+          <p>
+            Free trial for eligible new subscribers. Subscription renews automatically until canceled
+            in App Store settings.
+          </p>
+          <nav aria-label="Legal">
+            <button
+              type="button"
+              onMouseDown={stopDrag}
+              onClick={() =>
+                void openSubscriptionLink(
+                  "https://github.com/zxzin/codex-usage-meter/blob/main/PRIVACY.md",
+                )
+              }
+            >
+              Privacy
+            </button>
+            <button
+              type="button"
+              onMouseDown={stopDrag}
+              onClick={() =>
+                void openSubscriptionLink(
+                  "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/",
+                )
+              }
+            >
+              Terms
+            </button>
+          </nav>
+        </div>
+      </section>
     </main>
   );
 }

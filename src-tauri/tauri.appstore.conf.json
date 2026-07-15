@@ -1,15 +1,41 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
+  "version": "1.0.0",
   "bundle": {
     "targets": ["app"],
     "macOS": {
-      "minimumSystemVersion": "12.0",
+      "minimumSystemVersion": "13.0",
       "entitlements": "./Entitlements.appstore.plist",
       "signingIdentity": "-"
     }
   },
   "app": {
     "macOSPrivateApi": false,
+    "security": {
+      "capabilities": [
+        {
+          "identifier": "appstore",
+          "description": "Token Meter App Store permissions.",
+          "windows": ["main"],
+          "permissions": [
+            "core:default",
+            "core:window:allow-start-dragging",
+            "iap:default",
+            {
+              "identifier": "opener:allow-open-url",
+              "allow": [
+                {
+                  "url": "https://github.com/zxzin/codex-usage-meter/blob/main/PRIVACY.md"
+                },
+                {
+                  "url": "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
     "windows": [
       {
         "label": "main",

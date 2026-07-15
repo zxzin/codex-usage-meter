@@ -13,28 +13,30 @@ export async function getUsageSnapshot(): Promise<UsageSnapshot> {
         previewWarningShown = true;
         console.warn("Using explicit browser preview mock data:", error);
       }
-      return mockSnapshot(previewMode === "idle");
+      return mockSnapshot(previewMode);
     }
 
     throw new Error(
-      "Real token usage is only available in the Token Meter desktop app. Browser preview has no Tauri usage bridge; add ?mock=live or ?mock=idle only for visual preview.",
+      "Real token usage is only available in the Token Meter desktop app. Browser preview has no Tauri usage bridge; add ?mock=live, ?mock=idle, or ?mock=max only for visual preview.",
     );
   }
 }
 
-function mockSnapshot(idle = false): UsageSnapshot {
+function mockSnapshot(mode: string): UsageSnapshot {
+  const idle = mode === "idle";
+  const burnRate = mode === "max" ? 3_000_000 : 42_000;
   const now = Math.floor(Date.now() / 1000);
   return {
     generatedAt: now,
-    burnRatePerMin: idle ? 0 : 42000,
-    animationBurnRatePerMin: idle ? 0 : 42000,
+    burnRatePerMin: idle ? 0 : burnRate,
+    animationBurnRatePerMin: idle ? 0 : burnRate,
     state: idle ? "idle" : "live",
     activeSessions: idle ? 0 : 3,
     activitySessions: idle ? 0 : 3,
     observedSessions: 7,
     windowSeconds: 60,
     activeGraceSeconds: 90,
-    totalRecentTokens: idle ? 0 : 42000,
+    totalRecentTokens: idle ? 0 : burnRate,
     latestTotalTokens: 860000,
     primary: {
       usedPercent: 20,

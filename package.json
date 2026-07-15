@@ -22,7 +22,9 @@
     "tauri:build:appstore": "node scripts/build-app-store.mjs"
   },
   "dependencies": {
+    "@choochmeque/tauri-plugin-iap-api": "0.9.0",
     "@tauri-apps/api": "2.11.1",
+    "@tauri-apps/plugin-opener": "2.5.4",
     "react": "^19.2.3",
     "react-dom": "^19.2.3"
   },

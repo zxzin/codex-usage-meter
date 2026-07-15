@@ -5,18 +5,19 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
 const cargoTomlPath = join(root, "src-tauri", "Cargo.toml");
 const cargoToml = readFileSync(cargoTomlPath, "utf8");
 const releaseDir = join(root, ".release", "appstore");
+const staticConfig = join(root, "src-tauri", "tauri.appstore.conf.json");
+const appStoreConfig = JSON.parse(readFileSync(staticConfig, "utf8"));
+const appStoreVersion = appStoreConfig.version;
 const targetDir = resolve(
   process.env.TOKEN_METER_APPSTORE_TARGET_DIR ?? "/tmp/token-meter-appstore-target",
 );
 const generatedEntitlements = join(releaseDir, "Entitlements.generated.plist");
 const generatedConfig = join(releaseDir, "tauri.generated.conf.json");
-const staticConfig = join(root, "src-tauri", "tauri.appstore.conf.json");
 const appPath = join(targetDir, "release", "bundle", "macos", "Token Meter.app");
-const pkgPath = join(releaseDir, `Token Meter_${packageJson.version}.pkg`);
+const pkgPath = join(releaseDir, `Token Meter_${appStoreVersion}.pkg`);
 
 const teamId = process.env.APPLE_TEAM_ID?.trim() ?? "";
 const signingIdentity = process.env.APPLE_SIGNING_IDENTITY?.trim() || "-";
@@ -41,7 +42,7 @@ writeFileSync(generatedEntitlements, entitlementsPlist(teamId), "utf8");
 
 const macOsBundle = {
   entitlements: generatedEntitlements,
-  minimumSystemVersion: "12.0",
+  minimumSystemVersion: "13.0",
   signingIdentity,
 };
 if (profilePath) {

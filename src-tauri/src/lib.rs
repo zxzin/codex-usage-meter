@@ -16,6 +16,8 @@ use walkdir::WalkDir;
 
 #[cfg(all(target_os = "macos", feature = "app-store"))]
 use std::sync::mpsc;
+#[cfg(all(target_os = "macos", feature = "app-store"))]
+use tauri::LogicalSize;
 
 #[cfg(all(target_os = "macos", feature = "app-store"))]
 mod macos_native_renderer;
@@ -362,15 +364,67 @@ fn show_context_menu(window: tauri::Window, x: f64, y: f64) -> Result<(), String
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn get_release_channel() -> &'static str {
+    if cfg!(all(target_os = "macos", feature = "app-store")) {
+        "app_store"
+    } else {
+        "direct"
+    }
+}
+
+#[tauri::command]
+fn set_subscription_window_mode(window: tauri::WebviewWindow, paywall: bool) -> Result<(), String> {
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
+    {
+        if paywall {
+            macos_native_renderer::set_enabled(&window, false);
+            window
+                .set_resizable(false)
+                .map_err(|error| error.to_string())?;
+            window
+                .set_size(LogicalSize::new(380.0, 500.0))
+                .map_err(|error| error.to_string())?;
+            window.center().map_err(|error| error.to_string())?;
+        } else {
+            window
+                .set_size(LogicalSize::new(88.0, 88.0))
+                .map_err(|error| error.to_string())?;
+            window
+                .set_resizable(true)
+                .map_err(|error| error.to_string())?;
+            apply_transparent_window_chrome(&window);
+            macos_native_renderer::install(&window);
+            macos_native_renderer::set_enabled(&window, true);
+            position_main_window(&window);
+        }
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "app-store")))]
+    {
+        let _ = (window, paywall);
+    }
+
+    Ok(())
+}
+
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
+    let builder = builder
+        .plugin(tauri_plugin_iap::init())
+        .plugin(tauri_plugin_opener::init());
+
+    let app = builder
         .invoke_handler(tauri::generate_handler![
             get_usage_snapshot,
             ensure_codex_access,
             choose_codex_folder,
             start_window_drag,
             refresh_window_chrome,
-            show_context_menu
+            show_context_menu,
+            get_release_channel,
+            set_subscription_window_mode
         ])
         .setup(|app| {
             configure_app_data_home(app);
@@ -536,9 +590,6 @@ fn apply_macos_native_transparency(window: &tauri::WebviewWindow) {
             }
         }
     });
-
-    #[cfg(feature = "app-store")]
-    macos_native_renderer::install(window);
 }
 
 fn position_main_window(window: &tauri::WebviewWindow) {
