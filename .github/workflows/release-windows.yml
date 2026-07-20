@@ -1,0 +1,57 @@
+name: Release Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Windows release version, for example 0.1.9"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    name: Build Windows release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and upload Windows release assets
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: windows-v${{ inputs.version }}
+          releaseName: Token Meter for Windows v${{ inputs.version }}
+          releaseBody: |
+            Windows-only maintenance release.
+
+            - Fixed the extra console window when starting Token Meter on Windows.
+            - Keeps the 5-hour meter visible at 100% while Codex only exposes the weekly quota.
+            - Automatically uses the real 5-hour quota again when Codex exposes it.
+
+            macOS assets are intentionally unchanged.
+          releaseDraft: false
+          prerelease: false
+          args: --features direct-download --bundles nsis,msi
