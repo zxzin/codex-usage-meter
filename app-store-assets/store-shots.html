@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Token Meter App Store Screenshots</title>
+    <style>
+      :root {
+        color: #10213b;
+        background: #f7fafc;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+        font-synthesis: none;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 1280px;
+        height: 800px;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      body {
+        background: #f7fafc;
+      }
+
+      .shot {
+        position: relative;
+        width: 1280px;
+        height: 800px;
+        overflow: hidden;
+      }
+
+      .shot[hidden] {
+        display: none;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 13px;
+        color: #10213b;
+        font-size: 20px;
+        font-weight: 760;
+      }
+
+      .brand-mark {
+        position: relative;
+        width: 38px;
+        height: 33px;
+        background: #ffc72c;
+        border: 4px solid #10213b;
+        clip-path: polygon(25% 0, 75% 0, 100% 50%, 75% 100%, 25% 100%, 0 50%);
+      }
+
+      .brand-mark::after {
+        content: "";
+        position: absolute;
+        inset: 7px 9px;
+        background: #178b76;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1,
+      h2 {
+        font-family: "Avenir Next", Avenir, -apple-system, BlinkMacSystemFont, sans-serif;
+        letter-spacing: 0;
+      }
+
+      .eyebrow {
+        color: #167d6b;
+        font-size: 18px;
+        font-weight: 780;
+        text-transform: uppercase;
+      }
+
+      .subhead {
+        color: #526379;
+        font-size: 25px;
+        line-height: 1.35;
+      }
+
+      .actual-label {
+        color: #526379;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .shot-one {
+        display: grid;
+        grid-template-columns: 44% 56%;
+        background: #f7fafc;
+      }
+
+      .shot-one .copy {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 70px 28px 70px 78px;
+      }
+
+      .shot-one .brand {
+        margin-bottom: 74px;
+      }
+
+      .shot-one h1 {
+        max-width: 470px;
+        margin: 15px 0 24px;
+        font-size: 65px;
+        line-height: 1.02;
+      }
+
+      .shot-one .subhead {
+        max-width: 455px;
+      }
+
+      .shot-one .visual {
+        position: relative;
+        display: grid;
+        place-items: center;
+        background: #18bfa5;
+      }
+
+      .shot-one .visual::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 16px;
+        height: 100%;
+        background: #ffc72c;
+      }
+
+      .meter-single {
+        width: 570px;
+        height: 570px;
+        object-fit: contain;
+        image-rendering: auto;
+      }
+
+      .shot-one .actual-label {
+        position: absolute;
+        right: 42px;
+        bottom: 34px;
+        color: #10213b;
+      }
+
+      .shot-two {
+        display: flex;
+        flex-direction: column;
+        padding: 52px 70px 46px;
+        background: #10213b;
+        color: #ffffff;
+      }
+
+      .shot-two .topline {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+      }
+
+      .shot-two .brand {
+        color: #ffffff;
+      }
+
+      .shot-two h2 {
+        margin-top: 42px;
+        font-size: 57px;
+        line-height: 1.02;
+      }
+
+      .shot-two .subhead {
+        max-width: 620px;
+        margin-top: 14px;
+        color: #c9d5e4;
+      }
+
+      .frames {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 26px;
+        margin-top: 42px;
+      }
+
+      .frame {
+        position: relative;
+        height: 388px;
+        display: grid;
+        place-items: center;
+        background: #ffffff;
+        border-bottom: 12px solid #ffc72c;
+      }
+
+      .frame:nth-child(2) {
+        border-bottom-color: #24c5ab;
+      }
+
+      .frame:nth-child(3) {
+        border-bottom-color: #3e82f7;
+      }
+
+      .frame img {
+        width: 338px;
+        height: 338px;
+        object-fit: contain;
+      }
+
+      .shot-two .actual-label {
+        position: absolute;
+        right: 70px;
+        bottom: 18px;
+        color: #aebed1;
+      }
+
+      .shot-three {
+        display: grid;
+        grid-template-columns: 55% 45%;
+        background: #edf8f5;
+      }
+
+      .shot-three .visual {
+        position: relative;
+        display: grid;
+        place-items: center;
+        background: #ffffff;
+      }
+
+      .subscription-window {
+        width: 578px;
+        height: 760px;
+        object-fit: contain;
+      }
+
+      .shot-three .actual-label {
+        position: absolute;
+        left: 32px;
+        bottom: 20px;
+      }
+
+      .shot-three .copy {
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        padding: 64px 70px 64px 58px;
+      }
+
+      .shot-three .brand {
+        position: absolute;
+        top: 58px;
+        left: 58px;
+      }
+
+      .shot-three h2 {
+        margin: 16px 0 24px;
+        font-size: 59px;
+        line-height: 1.03;
+      }
+
+      .shot-three .subhead {
+        max-width: 430px;
+      }
+
+      .terms-note {
+        max-width: 430px;
+        margin-top: 34px;
+        padding-top: 24px;
+        color: #167d6b;
+        border-top: 3px solid #ffc72c;
+        font-size: 18px;
+        font-weight: 740;
+        line-height: 1.35;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shot shot-one" data-shot="1">
+      <section class="copy">
+        <div class="brand"><span class="brand-mark"></span>Token Meter for Codex</div>
+        <p class="eyebrow">Live usage, always visible</p>
+        <h1>Know your limits at a glance.</h1>
+        <p class="subhead">See your current 5-hour and weekly quota in one compact, always-on-top widget.</p>
+      </section>
+      <section class="visual">
+        <img class="meter-single" src="./captures/widget-native-frame-1.png" alt="Actual Token Meter widget" />
+        <p class="actual-label">Actual app interface · enlarged for clarity</p>
+      </section>
+    </main>
+
+    <main class="shot shot-two" data-shot="2" hidden>
+      <div class="topline">
+        <div>
+          <div class="brand"><span class="brand-mark"></span>Token Meter for Codex</div>
+          <h2>Your activity becomes motion.</h2>
+          <p class="subhead">The bees respond continuously to recent Codex usage while the meter stays readable.</p>
+        </div>
+      </div>
+      <section class="frames">
+        <div class="frame"><img src="./captures/widget-native-frame-1.png" alt="Live animation frame one" /></div>
+        <div class="frame"><img src="./captures/widget-native-frame-2.png" alt="Live animation frame two" /></div>
+        <div class="frame"><img src="./captures/widget-native-frame-3.png" alt="Live animation frame three" /></div>
+      </section>
+      <p class="actual-label">Three consecutive frames captured from the running macOS app</p>
+    </main>
+
+    <main class="shot shot-three" data-shot="3" hidden>
+      <section class="visual">
+        <img class="subscription-window" src="./captures/subscription-window.png" alt="Actual Token Meter subscription window" />
+        <p class="actual-label">Actual subscription screen</p>
+      </section>
+      <section class="copy">
+        <div class="brand"><span class="brand-mark"></span>Token Meter for Codex</div>
+        <p class="eyebrow">Try every feature</p>
+        <h2>7 days free. Then ¥1 monthly.</h2>
+        <p class="subhead">One simple subscription unlocks the live meter, animated bees, and automatic usage tracking.</p>
+        <p class="terms-note">Privacy Policy and Terms of Use are available before starting the trial.</p>
+      </section>
+    </main>
+
+    <script>
+      const selectedShot = new URLSearchParams(window.location.search).get("shot") || "1";
+      document.querySelectorAll("[data-shot]").forEach((shot) => {
+        shot.hidden = shot.dataset.shot !== selectedShot;
+      });
+    </script>
+  </body>
+</html>

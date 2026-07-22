@@ -4,6 +4,7 @@
   "bundle": {
     "targets": ["app"],
     "macOS": {
+      "bundleVersion": "1.0.1",
       "minimumSystemVersion": "13.0",
       "entitlements": "./Entitlements.appstore.plist",
       "signingIdentity": "-"

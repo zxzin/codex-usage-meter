@@ -156,6 +156,9 @@ enum ProviderMode {
 
 #[derive(Debug, Deserialize)]
 struct CodexAuth {
+    #[cfg(any(test, all(target_os = "macos", feature = "app-store")))]
+    #[serde(default)]
+    token_meter_review_sample: bool,
     tokens: Option<CodexAuthTokens>,
 }
 
@@ -697,6 +700,12 @@ fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::E
         .ok_or("Select the .codex folder to connect Token Meter to Codex.")?;
     #[cfg(not(all(target_os = "macos", feature = "app-store")))]
     let codex_home = codex_home();
+
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
+    if is_app_review_sample(&codex_home)? {
+        return Ok(app_review_sample_snapshot(codex_home, now));
+    }
+
     let sessions_dir = codex_home.join("sessions");
     let account_limits = account_rate_limits_cached(&codex_home, now);
 
@@ -1390,9 +1399,7 @@ fn write_cached_account_rate_limits(
 fn fetch_account_rate_limits(
     codex_home: &Path,
 ) -> Result<AccountRateLimits, Box<dyn std::error::Error>> {
-    let auth_path = codex_home.join("auth.json");
-    let auth_file = File::open(&auth_path)?;
-    let auth: CodexAuth = serde_json::from_reader(auth_file)?;
+    let auth = read_codex_auth(codex_home)?;
     let tokens = auth.tokens.ok_or("Codex auth tokens are missing")?;
     let access_token = tokens
         .access_token
@@ -1424,6 +1431,68 @@ fn fetch_account_rate_limits(
 
     let usage: CodexUsageResponse = response.json()?;
     Ok(account_limits_from_usage(usage))
+}
+
+fn read_codex_auth(codex_home: &Path) -> Result<CodexAuth, Box<dyn std::error::Error>> {
+    let auth_file = File::open(codex_home.join("auth.json"))?;
+    Ok(serde_json::from_reader(auth_file)?)
+}
+
+#[cfg(any(test, all(target_os = "macos", feature = "app-store")))]
+fn is_app_review_sample(codex_home: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    Ok(read_codex_auth(codex_home)?.token_meter_review_sample)
+}
+
+#[cfg(any(test, all(target_os = "macos", feature = "app-store")))]
+fn app_review_sample_snapshot(codex_home: PathBuf, now: i64) -> UsageSnapshot {
+    let sessions_dir = codex_home.join("sessions");
+    let burn_rate_per_min = 420_000.0;
+    let primary = LimitWindow {
+        used_percent: 38.0,
+        remaining_percent: 62.0,
+        window_minutes: Some(FIVE_HOUR_WINDOW_MINUTES),
+        resets_at: Some(now + 2 * 60 * 60),
+    };
+    let secondary = LimitWindow {
+        used_percent: 18.0,
+        remaining_percent: 82.0,
+        window_minutes: Some(WEEKLY_WINDOW_MINUTES),
+        resets_at: Some(now + 4 * 24 * 60 * 60),
+    };
+
+    UsageSnapshot {
+        generated_at: now,
+        burn_rate_per_min,
+        animation_burn_rate_per_min: burn_rate_per_min,
+        state: MeterState::Hot,
+        active_sessions: 1,
+        activity_sessions: 1,
+        observed_sessions: 1,
+        window_seconds: SPEED_WINDOW_SECONDS,
+        active_grace_seconds: ACTIVE_GRACE_SECONDS,
+        total_recent_tokens: 420_000,
+        latest_total_tokens: 1_240_000,
+        primary: Some(primary),
+        secondary: Some(secondary),
+        reset_credits_available: Some(3),
+        sessions: vec![SessionSummary {
+            id: "app-review-sample".to_string(),
+            cwd: Some("Token Meter Review Sample".to_string()),
+            path: sessions_dir.join("review-demo.jsonl").display().to_string(),
+            last_seen: now,
+            total_tokens: 1_240_000,
+            recent_tokens: 420_000,
+            burn_rate_per_min,
+            active: true,
+        }],
+        source: codex_source_status(
+            codex_home,
+            sessions_dir,
+            1,
+            "App Review sample data is active. No credentials are stored or transmitted."
+                .to_string(),
+        ),
+    }
 }
 
 fn account_limits_from_usage(usage: CodexUsageResponse) -> AccountRateLimits {
@@ -1904,6 +1973,45 @@ mod tests {
             window_minutes: Some(window_minutes),
             resets_at: Some(resets_at),
         }
+    }
+
+    #[test]
+    fn app_review_sample_auth_requires_an_explicit_marker() {
+        let sample_home = std::env::temp_dir().join(format!(
+            "token-meter-review-sample-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&sample_home).expect("create review sample folder");
+        fs::write(
+            sample_home.join("auth.json"),
+            r#"{"token_meter_review_sample":true,"tokens":null}"#,
+        )
+        .expect("write review sample auth");
+        let normal: CodexAuth = serde_json::from_str(r#"{"tokens":null}"#).expect("normal auth");
+
+        assert!(is_app_review_sample(&sample_home).expect("detect review sample"));
+        assert!(!normal.token_meter_review_sample);
+
+        fs::remove_dir_all(sample_home).expect("remove review sample folder");
+    }
+
+    #[test]
+    fn app_review_sample_snapshot_is_complete_and_credential_free() {
+        let now = 1_784_700_000;
+        let snapshot = app_review_sample_snapshot(PathBuf::from("/review-sample"), now);
+
+        assert_eq!(snapshot.generated_at, now);
+        assert_eq!(snapshot.animation_burn_rate_per_min, 420_000.0);
+        assert_eq!(snapshot.active_sessions, 1);
+        assert_eq!(
+            snapshot.primary.expect("five-hour quota").remaining_percent,
+            62.0
+        );
+        assert_eq!(
+            snapshot.secondary.expect("weekly quota").remaining_percent,
+            82.0
+        );
+        assert!(snapshot.source.message.contains("No credentials"));
     }
 
     #[test]
