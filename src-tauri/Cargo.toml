@@ -1,6 +1,6 @@
 [package]
 name = "token-meter"
-version = "0.1.9"
+version = "0.1.10"
 description = "A tiny local token burn meter."
 authors = ["zin"]
 edition = "2021"

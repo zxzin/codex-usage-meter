@@ -331,7 +331,22 @@ export function App() {
     if (event.button !== 0) {
       return;
     }
+
+    const target = event.target as HTMLElement;
+    if (
+      target.closest(
+        "button, a, input, select, textarea, label, summary, [role='button'], [role='link']",
+      )
+    ) {
+      return;
+    }
+
+    // Handle the drag ourselves during the capture phase. Tauri also installs a
+    // document-level drag-region listener; allowing both handlers to run can
+    // start two native drag operations for one press, which is unreliable on
+    // Windows transparent windows.
     event.preventDefault();
+    event.stopPropagation();
     void invoke("start_window_drag").catch(() => {
       void getCurrentWindow().startDragging().catch((err) => {
         console.warn("Window drag unavailable:", err);
@@ -362,7 +377,7 @@ export function App() {
         event.stopPropagation();
         void openNativeContextMenu(event.nativeEvent);
       }}
-      onMouseDown={startWindowDrag}
+      onMouseDownCapture={startWindowDrag}
     >
       <section className="meter-window" data-tauri-drag-region="deep">
         <div className="meter-body" data-tauri-drag-region="deep">
@@ -406,7 +421,11 @@ function SubscriptionPaywall({
   const product = gate.status === "inactive" ? gate.product : null;
 
   return (
-    <main className="subscription-shell" data-tauri-drag-region="deep" onMouseDown={onMouseDown}>
+    <main
+      className="subscription-shell"
+      data-tauri-drag-region="deep"
+      onMouseDownCapture={onMouseDown}
+    >
       <section className="subscription-panel">
         <img className="subscription-icon" src={appIconAsset} alt="" />
         <div className="subscription-heading">
