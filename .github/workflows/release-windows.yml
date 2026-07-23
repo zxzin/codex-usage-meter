@@ -47,7 +47,7 @@ jobs:
           releaseBody: |
             Windows-only maintenance release.
 
-            - Fixed the extra console window when starting Token Meter on Windows.
+            - Fixed the extra console window when starting Token Meter on Windows.`n            - Fixed mouse dragging for the floating bee widget on Windows.
             - Keeps the 5-hour meter visible at 100% while Codex only exposes the weekly quota.
             - Automatically uses the real 5-hour quota again when Codex exposes it.
 

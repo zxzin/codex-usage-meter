@@ -322,7 +322,7 @@ async fn request_codex_folder_access(
 }
 
 #[tauri::command]
-fn start_window_drag(window: tauri::Window) -> Result<(), String> {
+fn start_window_drag(window: tauri::WebviewWindow) -> Result<(), String> {
     window.start_dragging().map_err(|error| error.to_string())
 }
 

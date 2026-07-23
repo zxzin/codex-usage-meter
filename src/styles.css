@@ -713,6 +713,11 @@ button {
   max-width: none;
   max-height: none;
   margin: auto;
+  cursor: grab;
+}
+
+.size-micro .living-meter:active {
+  cursor: grabbing;
 }
 
 .size-micro .meter-body:has(.image-living) {
