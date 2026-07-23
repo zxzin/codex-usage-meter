@@ -5,11 +5,19 @@ use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
 use objc2_foundation::{
     NSData, NSString, NSURLBookmarkCreationOptions, NSURLBookmarkResolutionOptions, NSURL,
 };
+use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 static ACTIVE_CODEX_SCOPE: OnceLock<Mutex<Option<ActiveSecurityScope>>> = OnceLock::new();
+static ACTIVE_REVIEW_SAMPLE_HOME: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
+
+#[derive(Deserialize)]
+struct ReviewSampleMarker {
+    #[serde(default)]
+    token_meter_review_sample: bool,
+}
 
 struct ActiveSecurityScope {
     url: Retained<NSURL>,
@@ -25,10 +33,21 @@ impl Drop for ActiveSecurityScope {
 }
 
 pub fn active_codex_home() -> Option<PathBuf> {
+    if let Some(path) = active_review_sample_home() {
+        return Some(path);
+    }
+
     active_scope()
         .lock()
         .ok()
         .and_then(|scope| scope.as_ref().map(|scope| scope.path.clone()))
+}
+
+pub fn active_review_sample_home() -> Option<PathBuf> {
+    review_sample_home()
+        .lock()
+        .ok()
+        .and_then(|path| path.clone())
 }
 
 pub fn activate_saved_codex_home(bookmark_path: &Path) -> Result<PathBuf, String> {
@@ -97,6 +116,12 @@ pub fn choose_codex_home(
         .ok_or_else(|| "No Codex folder was selected.".to_string())?;
     let path = path_from_url(&url)?;
     validate_codex_home(&path)?;
+    if is_review_sample_home(&path)? {
+        activate_review_sample(path.clone())?;
+        return Ok(path);
+    }
+
+    clear_review_sample()?;
     save_bookmark(&url, bookmark_path)?;
     activate_scope(url, path.clone())?;
     Ok(path)
@@ -106,11 +131,37 @@ fn active_scope() -> &'static Mutex<Option<ActiveSecurityScope>> {
     ACTIVE_CODEX_SCOPE.get_or_init(|| Mutex::new(None))
 }
 
+fn review_sample_home() -> &'static Mutex<Option<PathBuf>> {
+    ACTIVE_REVIEW_SAMPLE_HOME.get_or_init(|| Mutex::new(None))
+}
+
+fn activate_review_sample(path: PathBuf) -> Result<(), String> {
+    let mut review_home = review_sample_home()
+        .lock()
+        .map_err(|_| "App Review sample access state is unavailable.".to_string())?;
+    *review_home = Some(path);
+
+    let mut active = active_scope()
+        .lock()
+        .map_err(|_| "Codex folder access state is unavailable.".to_string())?;
+    *active = None;
+    Ok(())
+}
+
+fn clear_review_sample() -> Result<(), String> {
+    let mut review_home = review_sample_home()
+        .lock()
+        .map_err(|_| "App Review sample access state is unavailable.".to_string())?;
+    *review_home = None;
+    Ok(())
+}
+
 fn activate_scope(url: Retained<NSURL>, path: PathBuf) -> Result<(), String> {
     if !unsafe { url.startAccessingSecurityScopedResource() } {
         return Err("macOS did not grant access to the selected Codex folder.".to_string());
     }
 
+    clear_review_sample()?;
     let mut active = active_scope()
         .lock()
         .map_err(|_| "Codex folder access state is unavailable.".to_string())?;
@@ -154,6 +205,13 @@ fn validate_codex_home(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn is_review_sample_home(path: &Path) -> Result<bool, String> {
+    let auth = fs::File::open(path.join("auth.json")).map_err(|error| error.to_string())?;
+    let marker: ReviewSampleMarker =
+        serde_json::from_reader(auth).map_err(|error| error.to_string())?;
+    Ok(marker.token_meter_review_sample)
+}
+
 fn path_from_url(url: &NSURL) -> Result<PathBuf, String> {
     url.path()
         .map(|path| PathBuf::from(path.to_string()))
@@ -162,4 +220,34 @@ fn path_from_url(url: &NSURL) -> Result<PathBuf, String> {
 
 fn ns_string(path: &Path) -> Retained<NSString> {
     NSString::from_str(&path.to_string_lossy())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credential_free_review_sample_is_detected_before_security_scope_activation() {
+        let sample_home = std::env::temp_dir().join(format!(
+            "token-meter-macos-review-sample-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&sample_home).expect("create review sample folder");
+        fs::write(
+            sample_home.join("auth.json"),
+            r#"{"token_meter_review_sample":true,"tokens":null}"#,
+        )
+        .expect("write review sample auth");
+
+        assert!(is_review_sample_home(&sample_home).expect("detect review sample"));
+        activate_review_sample(sample_home.clone()).expect("activate review sample");
+        assert_eq!(
+            active_review_sample_home().as_deref(),
+            Some(sample_home.as_path())
+        );
+        assert_eq!(active_codex_home().as_deref(), Some(sample_home.as_path()));
+        clear_review_sample().expect("clear review sample");
+
+        fs::remove_dir_all(sample_home).expect("remove review sample folder");
+    }
 }

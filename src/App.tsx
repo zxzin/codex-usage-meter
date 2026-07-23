@@ -142,6 +142,15 @@ export function App() {
     }
   }, []);
 
+  const connectCodexFolder = useCallback(async () => {
+    try {
+      await invoke<boolean>("choose_codex_folder");
+      await reloadSnapshot();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [reloadSnapshot]);
+
   useEffect(() => {
     if (!accessGranted) {
       return;
@@ -265,11 +274,7 @@ export function App() {
       });
 
     void listen("context-menu-connect", () => {
-      void invoke<boolean>("choose_codex_folder")
-        .then(() => reloadSnapshot())
-        .catch((err) => {
-          setError(err instanceof Error ? err.message : String(err));
-        });
+      void connectCodexFolder();
     })
       .then((unlisten) => {
         if (alive) {
@@ -288,7 +293,7 @@ export function App() {
       unlistenReload?.();
       unlistenConnect?.();
     };
-  }, [accessGranted, reloadSnapshot]);
+  }, [accessGranted, connectCodexFolder, reloadSnapshot]);
 
   useEffect(() => {
     if (!accessGranted) {
@@ -364,7 +369,7 @@ export function App() {
           {snapshot ? (
             <HiveMeter snapshot={snapshot} />
           ) : (
-            <LoadingMeter labels={labels} />
+            <LoadingMeter labels={labels} error={error} onConnect={connectCodexFolder} />
           )}
         </div>
       </section>
@@ -485,7 +490,30 @@ function SubscriptionPaywall({
   );
 }
 
-function LoadingMeter({ labels }: { labels: Labels }) {
+function LoadingMeter({
+  labels,
+  error,
+  onConnect,
+}: {
+  labels: Labels;
+  error: string | null;
+  onConnect: () => void;
+}) {
+  if (error) {
+    return (
+      <div className="loading-meter loading-meter-error" role="alert" title={error}>
+        <strong aria-hidden="true">!</strong>
+        <button
+          type="button"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={onConnect}
+        >
+          Reconnect
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="loading-meter">
       <span className="loading-ring" aria-hidden="true" />

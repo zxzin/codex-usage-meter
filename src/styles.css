@@ -575,6 +575,35 @@ button {
   animation: spin 1s linear infinite;
 }
 
+.loading-meter-error {
+  gap: 4px;
+  text-align: center;
+}
+
+.loading-meter-error strong {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 3px solid var(--danger);
+  border-radius: 50%;
+  color: var(--danger);
+  font-size: 18px;
+  line-height: 1;
+}
+
+.loading-meter-error button {
+  max-width: 72px;
+  padding: 1px 4px;
+  border: 0;
+  color: var(--line);
+  background: transparent;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.1;
+  cursor: pointer;
+}
+
 .detail-popover {
   position: fixed;
   left: 12px;

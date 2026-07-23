@@ -696,6 +696,11 @@ fn provider_mode_from_env() -> ProviderMode {
 fn collect_codex_usage_snapshot() -> Result<UsageSnapshot, Box<dyn std::error::Error>> {
     let now = Utc::now().timestamp();
     #[cfg(all(target_os = "macos", feature = "app-store"))]
+    if let Some(codex_home) = macos_store::active_review_sample_home() {
+        return Ok(app_review_sample_snapshot(codex_home, now));
+    }
+
+    #[cfg(all(target_os = "macos", feature = "app-store"))]
     let codex_home = macos_store::active_codex_home()
         .ok_or("Select the .codex folder to connect Token Meter to Codex.")?;
     #[cfg(not(all(target_os = "macos", feature = "app-store")))]
